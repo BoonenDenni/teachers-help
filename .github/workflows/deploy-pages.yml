@@ -43,17 +43,29 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: flutter pub get
 
+      # Only pass --dart-define when the secret is non-empty. Empty defines override
+      # String.fromEnvironment defaults in Dart with "", which breaks the Appwrite client.
       - name: Build web
         env:
           APPWRITE_ENDPOINT: ${{ secrets.APPWRITE_ENDPOINT }}
           APPWRITE_PROJECT_ID: ${{ secrets.APPWRITE_PROJECT_ID }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        shell: bash
         run: |
+          set -euo pipefail
+          extra=()
+          if [ -n "${APPWRITE_ENDPOINT:-}" ]; then
+            extra+=(--dart-define=APPWRITE_ENDPOINT="${APPWRITE_ENDPOINT}")
+          fi
+          if [ -n "${APPWRITE_PROJECT_ID:-}" ]; then
+            extra+=(--dart-define=APPWRITE_PROJECT_ID="${APPWRITE_PROJECT_ID}")
+          fi
+          if [ -n "${GOOGLE_API_KEY:-}" ]; then
+            extra+=(--dart-define=GOOGLE_API_KEY="${GOOGLE_API_KEY}")
+          fi
           flutter build web --release \
             --base-href "${{ steps.base.outputs.href }}" \
-            --dart-define=APPWRITE_ENDPOINT="${APPWRITE_ENDPOINT}" \
-            --dart-define=APPWRITE_PROJECT_ID="${APPWRITE_PROJECT_ID}" \
-            --dart-define=GOOGLE_API_KEY="${GOOGLE_API_KEY:-}"
+            "${extra[@]}"
         working-directory: ${{ github.workspace }}
 
       - name: SPA fallback for GitHub Pages
