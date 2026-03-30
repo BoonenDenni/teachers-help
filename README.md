@@ -42,6 +42,24 @@ flutter run -d chrome
 .\scripts\build_web.ps1 -ProjectId "<YOUR_PROJECT_ID>"
 ```
 
+## GitHub Pages
+
+Publieke site (na elke push naar `main`): [https://boonendenni.github.io/teachers-help/](https://boonendenni.github.io/teachers-help/)
+
+Bronrepo: [https://github.com/BoonenDenni/teachers-help](https://github.com/BoonenDenni/teachers-help)
+
+De workflow [.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml) bouwt Flutter Web en zet `404.html` gelijk aan `index.html` zodat routes na een refresh werken.
+
+**Repository secrets** (Settings → Secrets and variables → Actions): zet minstens `APPWRITE_ENDPOINT` en `APPWRITE_PROJECT_ID`. Voor Google Drive-picker in de webapp: `GOOGLE_API_KEY`. Zonder secrets valt de build terug op de defaults in `lib/config/app_config.dart` (niet aanbevolen voor productie).
+
+**Appwrite:** voeg in het project onder **Platforms** je exacte Pages-URL toe (bijv. `https://boonendenni.github.io` en het pad `/teachers-help/` indien gevraagd), zodat webclients requests mogen doen.
+
+**Google Cloud (Drive API key):** beperk de key tot HTTP-verwijzers die je site matchen, bijv. `https://boonendenni.github.io/teachers-help/*` en `http://localhost:*` voor lokaal testen.
+
+## Eerste push met GitHub CLI
+
+Als `git push` weigert vanwege workflow-bestanden, breid je token uit: `gh auth refresh -h github.com -s workflow`, daarna opnieuw pushen.
+
 # teachers_help
 
 A new Flutter project.
