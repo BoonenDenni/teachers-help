@@ -1,0 +1,184 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:appwrite/appwrite.dart';
+import 'package:appwrite/enums.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../appwrite/appwrite_providers.dart';
+
+final driveApiProvider = Provider<DriveApi>((ref) {
+  final functions = ref.watch(appwriteFunctionsProvider);
+  final config = ref.watch(appConfigProvider);
+  return DriveApi(functions: functions, functionId: config.driveFunctionId);
+});
+
+class DriveApi {
+  DriveApi({required this.functions, required this.functionId});
+
+  final Functions functions;
+  final String functionId;
+
+  Map<String, dynamic> _decodeJsonObject(String responseBody, {required String context}) {
+    final body = responseBody.trim();
+    if (body.isEmpty) {
+      throw StateError('$context: lege antwoordtekst.');
+    }
+    final decoded = jsonDecode(body);
+    if (decoded is! Map) {
+      throw StateError('$context: verwachte een JSON-object, kreeg ${decoded.runtimeType}. Body: $body');
+    }
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<Uri> getOAuthStartUrl() async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.gET,
+      path: '/oauth/start',
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive OAuth-start');
+    return Uri.parse(data['url'] as String);
+  }
+
+  Future<bool> getConnectionStatus() async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.gET,
+      path: '/status',
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive-status');
+    return data['connected'] == true;
+  }
+
+  Future<void> disconnect() async {
+    await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/disconnect',
+    );
+  }
+
+  Future<String> getAccessToken() async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.gET,
+      path: '/oauth/token',
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive OAuth-token');
+    final token = data['accessToken'];
+    if (token is! String || token.isEmpty) {
+      throw StateError('Geen toegangstoken ontvangen.');
+    }
+    return token;
+  }
+
+  Future<DriveUploadedFile> uploadBytes({
+    required String name,
+    required String mimeType,
+    required Uint8List bytes,
+    List<String>? parents,
+  }) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/drive/upload',
+      body: jsonEncode(<String, dynamic>{
+        'name': name,
+        'mimeType': mimeType,
+        'base64': base64Encode(bytes),
+        if (parents != null) 'parents': parents,
+      }),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive-upload');
+    final fileAny = data['file'];
+    if (fileAny is! Map) {
+      final err = data['error'];
+      final apiMsg = data['message'];
+      if (apiMsg is String && apiMsg.isNotEmpty) {
+        throw StateError('Drive-upload mislukt${err is String ? ' ($err)' : ''}: $apiMsg');
+      }
+      throw StateError('Drive-upload: ontbreekt of ongeldig veld „file” in antwoord. Body: ${result.responseBody}');
+    }
+    final file = Map<String, dynamic>.from(fileAny);
+    return DriveUploadedFile(
+      id: file['id'] as String,
+      name: (file['name'] as String?) ?? name,
+      mimeType: (file['mimeType'] as String?) ?? mimeType,
+    );
+  }
+
+  Future<String> publicDownloadDataUrl({
+    required String publicToken,
+    required String fileId,
+  }) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/public/download',
+      body: jsonEncode(<String, dynamic>{
+        'publicToken': publicToken,
+        'fileId': fileId,
+      }),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Openbare Drive-download');
+    final mimeType = data['mimeType'] as String? ?? 'application/octet-stream';
+    final base64 = data['base64'] as String;
+    return 'data:$mimeType;base64,$base64';
+  }
+
+  Future<String> downloadDataUrl({required String fileId}) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/drive/download',
+      body: jsonEncode(<String, dynamic>{
+        'fileId': fileId,
+      }),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive-download');
+    final mimeType = data['mimeType'] as String? ?? 'application/octet-stream';
+    final base64 = data['base64'] as String;
+    return 'data:$mimeType;base64,$base64';
+  }
+
+  Future<DriveDownloadedBytes> downloadBytes({required String fileId}) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/drive/download',
+      body: jsonEncode(<String, dynamic>{'fileId': fileId}),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive-download (bytes)');
+    final mimeType = data['mimeType'] as String? ?? 'application/octet-stream';
+    final base64 = data['base64'] as String;
+    return DriveDownloadedBytes(
+      mimeType: mimeType,
+      bytes: base64Decode(base64),
+    );
+  }
+}
+
+class DriveDownloadedBytes {
+  const DriveDownloadedBytes({required this.mimeType, required this.bytes});
+
+  final String mimeType;
+  final Uint8List bytes;
+}
+
+class DriveUploadedFile {
+  const DriveUploadedFile({
+    required this.id,
+    required this.name,
+    required this.mimeType,
+  });
+
+  final String id;
+  final String name;
+  final String mimeType;
+}
+

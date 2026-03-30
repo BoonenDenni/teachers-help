@@ -1,0 +1,84 @@
+param(
+  [Parameter(Mandatory = $true)][string]$ProjectId,
+  [Parameter(Mandatory = $true)][string]$ApiKey,
+  [string]$Endpoint = "https://cloud.appwrite.io/v1",
+  [string]$DatabaseId = "teachers_help"
+)
+
+$ErrorActionPreference = "Stop"
+
+function Require-Command($name) {
+  if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
+    throw "Missing required command: $name"
+  }
+}
+
+Require-Command "appwrite"
+
+Write-Host "Using endpoint=$Endpoint project=$ProjectId db=$DatabaseId"
+
+# Configure environment for the Appwrite CLI.
+$env:APPWRITE_ENDPOINT = $Endpoint
+$env:APPWRITE_PROJECT_ID = $ProjectId
+$env:APPWRITE_API_KEY = $ApiKey
+
+# Database
+cmd /c "appwrite databases get --database-id $DatabaseId >nul 2>nul"
+if ($LASTEXITCODE -ne 0) {
+  appwrite databases create --database-id $DatabaseId --name "Teachers Help"
+}
+
+# Collections
+cmd /c "appwrite databases get-collection --database-id $DatabaseId --collection-id classes >nul 2>nul"
+if ($LASTEXITCODE -ne 0) {
+  appwrite databases create-collection --database-id $DatabaseId --collection-id "classes" --name "Classes" --document-security true
+}
+cmd /c "appwrite databases get-collection --database-id $DatabaseId --collection-id tabs >nul 2>nul"
+if ($LASTEXITCODE -ne 0) {
+  appwrite databases create-collection --database-id $DatabaseId --collection-id "tabs" --name "Tabs" --document-security true
+}
+cmd /c "appwrite databases get-collection --database-id $DatabaseId --collection-id cards >nul 2>nul"
+if ($LASTEXITCODE -ne 0) {
+  appwrite databases create-collection --database-id $DatabaseId --collection-id "cards" --name "Cards" --document-security true
+}
+cmd /c "appwrite databases get-collection --database-id $DatabaseId --collection-id drive_connections >nul 2>nul"
+if ($LASTEXITCODE -ne 0) {
+  appwrite databases create-collection --database-id $DatabaseId --collection-id "drive_connections" --name "Drive Connections" --document-security true
+}
+
+# Attributes and indexes
+# classes
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "classes" --key "teacherId" --size 64 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "classes" --key "name" --size 128 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "classes" --key "publicToken" --size 64 --required true
+appwrite databases create-index --database-id $DatabaseId --collection-id "classes" --key "byTeacher" --type "key" --attributes "teacherId"
+appwrite databases create-index --database-id $DatabaseId --collection-id "classes" --key "byPublicToken" --type "unique" --attributes "publicToken"
+
+# tabs
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "tabs" --key "classId" --size 64 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "tabs" --key "title" --size 128 --required true
+appwrite databases create-integer-attribute --database-id $DatabaseId --collection-id "tabs" --key "sortOrder" --required true --min 0 --max 100000
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "tabs" --key "tabColorHex" --size 16 --required false
+appwrite databases create-index --database-id $DatabaseId --collection-id "tabs" --key "byClass" --type "key" --attributes "classId"
+appwrite databases create-index --database-id $DatabaseId --collection-id "tabs" --key "byClassAndSort" --type "key" --attributes "classId" "sortOrder"
+
+# cards
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "tabId" --size 64 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "title" --size 128 --required false
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "imageDriveFileId" --size 128 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "audioDriveFileId" --size 128 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "imageMimeType" --size 64 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "audioMimeType" --size 64 --required true
+appwrite databases create-integer-attribute --database-id $DatabaseId --collection-id "cards" --key "sortOrder" --required true --min 0 --max 100000
+appwrite databases create-datetime-attribute --database-id $DatabaseId --collection-id "cards" --key "createdAt" --required true
+appwrite databases create-index --database-id $DatabaseId --collection-id "cards" --key "byTab" --type "key" --attributes "tabId"
+appwrite databases create-index --database-id $DatabaseId --collection-id "cards" --key "byTabAndSort" --type "key" --attributes "tabId" "sortOrder"
+
+# drive_connections
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "drive_connections" --key "teacherId" --size 64 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "drive_connections" --key "googleUserId" --size 128 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "drive_connections" --key "refreshTokenEnc" --size 4096 --required true
+appwrite databases create-index --database-id $DatabaseId --collection-id "drive_connections" --key "byTeacher" --type "unique" --attributes "teacherId"
+
+Write-Host "Done. Next: configure permissions per-doc for public student link access."
+

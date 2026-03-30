@@ -1,0 +1,31 @@
+import 'package:flutter/foundation.dart';
+
+import '../../config/app_config.dart';
+
+@immutable
+class SchemaIds {
+  const SchemaIds({
+    required this.databaseId,
+    required this.classesCollectionId,
+    required this.tabsCollectionId,
+    required this.cardsCollectionId,
+    required this.driveConnectionsCollectionId,
+  });
+
+  factory SchemaIds.fromConfig(AppConfig config) {
+    return SchemaIds(
+      databaseId: config.appwriteDatabaseId,
+      classesCollectionId: config.appwriteClassesCollectionId,
+      tabsCollectionId: config.appwriteTabsCollectionId,
+      cardsCollectionId: config.appwriteCardsCollectionId,
+      driveConnectionsCollectionId: config.appwriteDriveConnectionsCollectionId,
+    );
+  }
+
+  final String databaseId;
+  final String classesCollectionId;
+  final String tabsCollectionId;
+  final String cardsCollectionId;
+  final String driveConnectionsCollectionId;
+}
+

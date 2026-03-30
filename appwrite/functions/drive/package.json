@@ -1,0 +1,12 @@
+{
+  "name": "teachers-help-drive",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "dependencies": {
+    "googleapis": "^156.0.0",
+    "node-appwrite": "^14.2.0"
+  }
+}
+
