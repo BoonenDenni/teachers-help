@@ -52,3 +52,6 @@ app.*.map.json
 .env
 .env.*
 !.env.example
+
+# Appwrite function bundles (generated artifacts)
+appwrite/functions/*.tar.gz
