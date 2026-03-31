@@ -175,6 +175,7 @@ class _TeacherTabScreenState extends ConsumerState<TeacherTabScreen> {
         builder: (_) => _CreateCardScreen(
           userId: widget.userId,
           tabId: _tab.id,
+          tabDriveFolderId: _tab.driveFolderId,
           sortOrder: card.sortOrder,
           existing: card,
         ),
@@ -527,6 +528,7 @@ class _TeacherTabScreenState extends ConsumerState<TeacherTabScreen> {
                                   builder: (_) => _CreateCardScreen(
                                     userId: widget.userId,
                                     tabId: _tab.id,
+                                    tabDriveFolderId: _tab.driveFolderId,
                                     sortOrder: _cards.length,
                                   ),
                                 ),
@@ -777,12 +779,14 @@ class _CreateCardScreen extends ConsumerStatefulWidget {
   const _CreateCardScreen({
     required this.userId,
     required this.tabId,
+    required this.tabDriveFolderId,
     required this.sortOrder,
     this.existing,
   });
 
   final String userId;
   final String tabId;
+  final String? tabDriveFolderId;
   final int sortOrder;
   final CardItem? existing;
 
@@ -1575,20 +1579,39 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
       final drive = ref.read(driveApiProvider);
       final repo = ref.read(teacherRepositoryProvider);
 
-      String? uploadFolderId;
-      try {
-        final root = await drive.getRootFolderId();
-        if (root.trim().isNotEmpty) {
-          final appFolder = await drive.ensureFolder(parentId: root, name: 'Teachers Help');
-          uploadFolderId = await drive.ensureFolder(parentId: appFolder, name: 'Uploads');
+      String? cardFolderId = widget.existing?.driveFolderId?.trim();
+      if (cardFolderId != null && cardFolderId.isEmpty) cardFolderId = null;
+
+      // Best effort: create/ensure a per-card folder under the current tab folder.
+      if (cardFolderId == null) {
+        try {
+          final tabFolderId = widget.tabDriveFolderId?.trim();
+          if (tabFolderId != null && tabFolderId.isNotEmpty) {
+            final cardsFolder = await drive.ensureFolder(parentId: tabFolderId, name: 'Kaarten');
+            final cardFolderName = '${_sanitizeForDriveFilename(titleText)}-${_shortId()}';
+            cardFolderId = await drive.ensureFolder(parentId: cardsFolder, name: cardFolderName);
+          }
+        } catch (_) {
+          cardFolderId = null;
         }
-      } catch (_) {
-        // Best effort: uploads can still proceed without parents.
-        uploadFolderId = null;
       }
-      final parents = (uploadFolderId != null && uploadFolderId.isNotEmpty)
-          ? <String>[uploadFolderId]
-          : null;
+
+      // Fallback: if we couldn't create the card folder, upload into a generic Uploads folder (old behavior).
+      List<String>? parents;
+      if (cardFolderId != null && cardFolderId.isNotEmpty) {
+        parents = <String>[cardFolderId];
+      } else {
+        try {
+          final root = await drive.getRootFolderId();
+          if (root.trim().isNotEmpty) {
+            final appFolder = await drive.ensureFolder(parentId: root, name: 'Teachers Help');
+            final uploadFolderId = await drive.ensureFolder(parentId: appFolder, name: 'Uploads');
+            if (uploadFolderId.trim().isNotEmpty) parents = <String>[uploadFolderId.trim()];
+          }
+        } catch (_) {
+          parents = null;
+        }
+      }
 
       final DriveUploadedFile? img = hasImage
           ? (_imageDriveFileId != null
@@ -1645,8 +1668,72 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
         );
       }
 
+      // Persist the card folder id (best effort).
+      if (cardFolderId != null && cardFolderId.isNotEmpty) {
+        try {
+          if ((widget.existing?.driveFolderId ?? '').trim().isEmpty) {
+            await repo.setCardDriveFolderId(cardId: result.id, driveFolderId: cardFolderId);
+          }
+        } catch (_) {
+          // Best effort.
+        }
+      }
+
+      // If the teacher picked an existing Drive file, create a shortcut in the card folder
+      // (no extra storage). Only do this when we have a per-card folder.
+      if (cardFolderId != null && cardFolderId.isNotEmpty) {
+        try {
+          final existingImgId = widget.existing?.imageDriveFileId.trim() ?? '';
+          final pickedImgId = _imageDriveFileId?.trim() ?? '';
+          final shouldShortcutImg = pickedImgId.isNotEmpty &&
+              _imageBytes == null &&
+              (widget.existing == null || pickedImgId != existingImgId);
+          if (shouldShortcutImg) {
+            await drive.createShortcut(
+              parentId: cardFolderId,
+              targetFileId: pickedImgId,
+              name: '${_sanitizeForDriveFilename(titleText)}-image',
+            );
+          }
+        } catch (_) {
+          // Best effort.
+        }
+        try {
+          final existingAudId = widget.existing?.audioDriveFileId.trim() ?? '';
+          final pickedAudId = _audioDriveFileId?.trim() ?? '';
+          final shouldShortcutAud = pickedAudId.isNotEmpty &&
+              _audioBytes == null &&
+              (widget.existing == null || pickedAudId != existingAudId);
+          if (shouldShortcutAud) {
+            await drive.createShortcut(
+              parentId: cardFolderId,
+              targetFileId: pickedAudId,
+              name: '${_sanitizeForDriveFilename(titleText)}-audio',
+            );
+          }
+        } catch (_) {
+          // Best effort.
+        }
+      }
+
       if (!mounted) return;
-      Navigator.of(context).pop<CardItem>(result);
+      Navigator.of(context).pop<CardItem>(
+        (cardFolderId != null && cardFolderId.isNotEmpty && (result.driveFolderId ?? '').trim().isEmpty)
+            ? CardItem(
+                id: result.id,
+                tabId: result.tabId,
+                title: result.title,
+                imageDriveFileId: result.imageDriveFileId,
+                audioDriveFileId: result.audioDriveFileId,
+                imageMimeType: result.imageMimeType,
+                audioMimeType: result.audioMimeType,
+                imageAnnotationsJson: result.imageAnnotationsJson,
+                driveFolderId: cardFolderId,
+                sortOrder: result.sortOrder,
+                createdAtIso: result.createdAtIso,
+              )
+            : result,
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
