@@ -282,6 +282,41 @@ class DriveApi {
       bytes: base64Decode(base64),
     );
   }
+
+  Future<DriveCreatedShortcut> createShortcut({
+    required String parentId,
+    required String targetFileId,
+    String? name,
+  }) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/drive/shortcut/create',
+      body: jsonEncode(<String, dynamic>{
+        'parentId': parentId,
+        'targetFileId': targetFileId,
+        if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
+      }),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive shortcut create');
+    final fileAny = data['file'];
+    if (fileAny is! Map) {
+      throw StateError(
+        'Drive shortcut create: ontbreekt of ongeldig veld „file” in antwoord. Body: ${result.responseBody}',
+      );
+    }
+    final file = Map<String, dynamic>.from(fileAny);
+    final id = file['id'];
+    if (id is! String || id.isEmpty) {
+      throw StateError('Drive shortcut create: ontbrekende id.');
+    }
+    return DriveCreatedShortcut(
+      id: id,
+      name: (file['name'] as String?) ?? (name ?? 'Shortcut'),
+      mimeType: (file['mimeType'] as String?) ?? 'application/vnd.google-apps.shortcut',
+    );
+  }
 }
 
 class DriveDownloadedBytes {
@@ -293,6 +328,18 @@ class DriveDownloadedBytes {
 
 class DriveUploadedFile {
   const DriveUploadedFile({
+    required this.id,
+    required this.name,
+    required this.mimeType,
+  });
+
+  final String id;
+  final String name;
+  final String mimeType;
+}
+
+class DriveCreatedShortcut {
+  const DriveCreatedShortcut({
     required this.id,
     required this.name,
     required this.mimeType,

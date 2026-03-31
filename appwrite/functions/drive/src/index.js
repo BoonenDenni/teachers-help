@@ -237,6 +237,42 @@ export default async ({ req, res, log, error }) => {
       return json(res, 200, { ok: true });
     }
 
+    // POST /drive/shortcut/create
+    // body: { parentId: string, targetFileId: string, name?: string } -> { file }
+    if (req.method === 'POST' && path === '/drive/shortcut/create') {
+      const teacherId = requireUserId(req, res);
+      if (typeof teacherId !== 'string') return teacherId;
+      const body = parseBodyJson(req) || {};
+      const { parentId, targetFileId, name } = body;
+      if (typeof parentId !== 'string' || parentId.trim() === '') {
+        return json(res, 400, { error: 'BAD_REQUEST', message: 'Missing parentId.' });
+      }
+      if (typeof targetFileId !== 'string' || targetFileId.trim() === '') {
+        return json(res, 400, { error: 'BAD_REQUEST', message: 'Missing targetFileId.' });
+      }
+
+      const client = createAdminClient();
+      const databases = createDatabases(client);
+      const conn = await getDriveConnection({ databases, teacherId });
+      if (!conn) return json(res, 409, { error: 'NOT_CONNECTED', message: 'Google Drive not connected.' });
+
+      const refreshToken = decryptString(conn.refreshTokenEnc);
+      const drive = await driveClientFromRefreshToken(refreshToken);
+
+      const shortcutName =
+        typeof name === 'string' && name.trim() !== '' ? name.trim() : 'Shortcut';
+      const createRes = await drive.files.create({
+        requestBody: {
+          name: shortcutName,
+          parents: [parentId.trim()],
+          mimeType: 'application/vnd.google-apps.shortcut',
+          shortcutDetails: { targetId: targetFileId.trim() },
+        },
+        fields: 'id,name,mimeType,shortcutDetails',
+      });
+      return json(res, 200, { file: createRes.data });
+    }
+
     // POST /drive/item/trash
     // body: { fileId: string } -> { ok: true }
     if (req.method === 'POST' && path === '/drive/item/trash') {
