@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/models/card_item.dart';
+import '../../domain/cards/card_types.dart';
 import '../../domain/models/tab_category.dart';
 import '../../services/appwrite/teacher_repository.dart';
 import '../../services/audio/app_audio_player.dart';
@@ -796,6 +797,9 @@ class _CreateCardScreen extends ConsumerStatefulWidget {
 
 class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
   final TextEditingController _title = TextEditingController();
+  String _cardType = CardTypeIds.soundImage;
+  final TextEditingController _fillPrompt = TextEditingController();
+  final TextEditingController _fillAnswers = TextEditingController();
   final Random _rng = Random.secure();
   Uint8List? _imageBytes;
   String? _imageMime;
@@ -840,6 +844,12 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
     final existing = widget.existing;
     if (existing != null) {
       _title.text = existing.title ?? '';
+      _cardType = CardTypeRegistry.normalizeType(existing.cardType);
+      if (_cardType == CardTypeIds.imageFillIn) {
+        final decoded = ImageFillInCardData.tryDecode(existing.cardDataJson);
+        _fillPrompt.text = decoded?.prompt ?? '';
+        _fillAnswers.text = (decoded?.acceptedAnswers ?? const <String>[]).join(', ');
+      }
       if (existing.imageDriveFileId.trim().isNotEmpty) {
         _imageDriveFileId = existing.imageDriveFileId;
         _imageMime = existing.imageMimeType;
@@ -920,6 +930,8 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
   @override
   void dispose() {
     _title.dispose();
+    _fillPrompt.dispose();
+    _fillAnswers.dispose();
     _player.stop();
     _stopListeningImagePixelSize();
     // Best-effort cleanup to release the microphone if it was opened.
@@ -1547,7 +1559,13 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
     _stopPreview();
     final hasImage = (_imageDriveFileId != null) || (_imageBytes != null);
     final hasAudio = (_audioDriveFileId != null) || (_audioBytes != null);
-    if (!hasImage && !hasAudio) {
+    if (_cardType == CardTypeIds.imageFillIn && !hasImage) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kies een afbeelding.')),
+      );
+      return;
+    }
+    if (_cardType == CardTypeIds.soundImage && !hasImage && !hasAudio) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Kies een afbeelding of audio (minstens één).')),
       );
@@ -1559,7 +1577,7 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
       );
       return;
     }
-    if (hasAudio && (_audioMime == null || _audioName == null)) {
+    if (_cardType == CardTypeIds.soundImage && hasAudio && (_audioMime == null || _audioName == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Audio is incompleet. Kies/Neem opnieuw.')),
       );
@@ -1572,6 +1590,25 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
         const SnackBar(content: Text('Titel is verplicht.')),
       );
       return;
+    }
+
+    String? cardDataJson;
+    if (_cardType == CardTypeIds.imageFillIn) {
+      final prompt = _fillPrompt.text.trim();
+      final answers = parseAcceptedAnswersCsv(_fillAnswers.text);
+      if (prompt.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Schrijf een zin/vraag, bijv. "Dit is een ...?"')),
+        );
+        return;
+      }
+      if (answers.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Vul minstens één goed antwoord in.')),
+        );
+        return;
+      }
+      cardDataJson = ImageFillInCardData(prompt: prompt, acceptedAnswers: answers).encode();
     }
 
     setState(() => _saving = true);
@@ -1648,6 +1685,8 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
         result = await repo.updateCard(
           cardId: widget.existing!.id,
           title: titleText,
+          cardType: _cardType,
+          cardDataJson: cardDataJson,
           imageDriveFileId: img?.id ?? '',
           audioDriveFileId: aud?.id ?? '',
           imageMimeType: img?.mimeType ?? '',
@@ -1659,6 +1698,8 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
           teacherId: widget.userId,
           tabId: widget.tabId,
           title: titleText,
+          cardType: _cardType,
+          cardDataJson: cardDataJson,
           imageDriveFileId: img?.id ?? '',
           audioDriveFileId: aud?.id ?? '',
           imageMimeType: img?.mimeType ?? '',
@@ -1723,6 +1764,8 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
                 id: result.id,
                 tabId: result.tabId,
                 title: result.title,
+                cardType: result.cardType,
+                cardDataJson: result.cardDataJson,
                 imageDriveFileId: result.imageDriveFileId,
                 audioDriveFileId: result.audioDriveFileId,
                 imageMimeType: result.imageMimeType,
@@ -1761,6 +1804,64 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
             ),
           ),
           const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _cardType,
+            decoration: const InputDecoration(
+              labelText: 'Kaart type',
+              border: OutlineInputBorder(),
+            ),
+            items: <DropdownMenuItem<String>>[
+              for (final opt in CardTypeRegistry.teacherOptions)
+                DropdownMenuItem<String>(
+                  value: opt.id,
+                  child: Text(opt.label),
+                ),
+            ],
+            onChanged: _saving
+                ? null
+                : (v) {
+                    if (v == null) return;
+                    setState(() => _cardType = v);
+                  },
+          ),
+          const SizedBox(height: 12),
+          if (_cardType == CardTypeIds.imageFillIn)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text('Invulvraag', style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _fillPrompt,
+                      decoration: const InputDecoration(
+                        labelText: 'Zin/vraag *',
+                        hintText: 'Bijv. Dit is een ...?',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _fillAnswers,
+                      decoration: const InputDecoration(
+                        labelText: 'Goede antwoorden *',
+                        hintText: 'Bijv. hond, puppy, poedel',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Tip: meerdere antwoorden scheiden met komma’s.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -1844,150 +1945,158 @@ class _CreateCardScreenState extends ConsumerState<_CreateCardScreen> {
                       ],
                     ),
                   ),
-                  Card(
-                    clipBehavior: Clip.antiAlias,
-                    child: AspectRatio(
-                      aspectRatio: 1,
-                      child: ColoredBox(
-                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                        child: _imagePreviewLoading
-                            ? const Center(
-                                child: SizedBox(
-                                  width: 28,
-                                  height: 28,
-                                  child: CircularProgressIndicator(strokeWidth: 3),
-                                ),
-                              )
-                            : (_imagePreviewError != null)
-                                ? Center(
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(16),
-                                      child: Text('Afbeelding laden mislukt: $_imagePreviewError'),
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 520),
+                      child: Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: AspectRatio(
+                          aspectRatio: 1,
+                          child: ColoredBox(
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            child: _imagePreviewLoading
+                                ? const Center(
+                                    child: SizedBox(
+                                      width: 28,
+                                      height: 28,
+                                      child: CircularProgressIndicator(strokeWidth: 3),
                                     ),
                                   )
-                                : (_imagePreviewUrl == null)
-                                    ? const Center(child: Text('Geen voorbeeld beschikbaar.'))
-                                    : LayoutBuilder(
-                                        builder: (context, constraints) {
-                                          final size = Size(constraints.maxWidth, constraints.maxHeight);
-                                          final imageRect = _imageRectForContainer(size);
-                                          _lastImageRect = imageRect;
-                                          final from = _arrowFrom;
-                                          final to = _arrowTo;
-                                          final transient = (from != null && to != null)
-                                              ? ArrowAnnotation(
-                                                  fromX: from.x,
-                                                  fromY: from.y,
-                                                  toX: to.x,
-                                                  toY: to.y,
-                                                  colorHex: '#FF0000',
-                                                  width: 6,
-                                                )
-                                              : null;
-                                          return Stack(
-                                            fit: StackFit.expand,
-                                            children: <Widget>[
-                                              Image.network(
-                                                _imagePreviewUrl!,
-                                                fit: BoxFit.contain,
-                                                errorBuilder: (context, error, stackTrace) {
-                                                  return const Center(
-                                                    child: Text('Afbeelding laden mislukt'),
-                                                  );
-                                                },
-                                              ),
-                                              GestureDetector(
-                                                behavior: HitTestBehavior.opaque,
-                                                onTapUp: (d) =>
-                                                    _onAnnotTap(localPos: d.localPosition, imageRect: imageRect),
-                                                onPanStart: (d) => _onAnnotPanStart(
-                                                  localPos: d.localPosition,
-                                                  imageRect: imageRect,
-                                                ),
-                                                onPanUpdate: (d) => _onAnnotPanUpdate(
-                                                  localPos: d.localPosition,
-                                                  imageRect: imageRect,
-                                                ),
-                                                onPanEnd: (_) => _onAnnotPanEnd(),
-                                                child: CustomPaint(
-                                                  painter: _ImageAnnotPainter(
-                                                    items: _imageAnnotations,
-                                                    transientArrow: transient,
-                                                    imageRect: imageRect,
-                                                    selectedIndex: _selectedAnnotIndex,
-                                                activeArrowDragTarget: _arrowDragTarget,
+                                : (_imagePreviewError != null)
+                                    ? Center(
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(16),
+                                          child: Text('Afbeelding laden mislukt: $_imagePreviewError'),
+                                        ),
+                                      )
+                                    : (_imagePreviewUrl == null)
+                                        ? const Center(child: Text('Geen voorbeeld beschikbaar.'))
+                                        : LayoutBuilder(
+                                            builder: (context, constraints) {
+                                              final size = Size(constraints.maxWidth, constraints.maxHeight);
+                                              final imageRect = _imageRectForContainer(size);
+                                              _lastImageRect = imageRect;
+                                              final from = _arrowFrom;
+                                              final to = _arrowTo;
+                                              final transient = (from != null && to != null)
+                                                  ? ArrowAnnotation(
+                                                      fromX: from.x,
+                                                      fromY: from.y,
+                                                      toX: to.x,
+                                                      toY: to.y,
+                                                      colorHex: '#FF0000',
+                                                      width: 6,
+                                                    )
+                                                  : null;
+                                              return Stack(
+                                                fit: StackFit.expand,
+                                                children: <Widget>[
+                                                  Image.network(
+                                                    _imagePreviewUrl!,
+                                                    fit: BoxFit.contain,
+                                                    errorBuilder: (context, error, stackTrace) {
+                                                      return const Center(
+                                                        child: Text('Afbeelding laden mislukt'),
+                                                      );
+                                                    },
                                                   ),
-                                                ),
-                                              ),
-                                            ],
-                                          );
-                                        },
-                                      ),
+                                                  GestureDetector(
+                                                    behavior: HitTestBehavior.opaque,
+                                                    onTapUp: (d) => _onAnnotTap(
+                                                      localPos: d.localPosition,
+                                                      imageRect: imageRect,
+                                                    ),
+                                                    onPanStart: (d) => _onAnnotPanStart(
+                                                      localPos: d.localPosition,
+                                                      imageRect: imageRect,
+                                                    ),
+                                                    onPanUpdate: (d) => _onAnnotPanUpdate(
+                                                      localPos: d.localPosition,
+                                                      imageRect: imageRect,
+                                                    ),
+                                                    onPanEnd: (_) => _onAnnotPanEnd(),
+                                                    child: CustomPaint(
+                                                      painter: _ImageAnnotPainter(
+                                                        items: _imageAnnotations,
+                                                        transientArrow: transient,
+                                                        imageRect: imageRect,
+                                                        selectedIndex: _selectedAnnotIndex,
+                                                        activeArrowDragTarget: _arrowDragTarget,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              );
+                                            },
+                                          ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text('Audio', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 4),
-                  Text(
-                    _audioName ?? 'Niet gekozen',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          if (_cardType == CardTypeIds.soundImage)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text('Audio', style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 4),
+                    Text(
+                      _audioName ?? 'Niet gekozen',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        FilledButton.tonal(
+                          onPressed: _saving ? null : _pickAudioFromDrive,
+                          child: const Text('Uit Drive'),
                         ),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <Widget>[
-                      FilledButton.tonal(
-                        onPressed: _saving ? null : _pickAudioFromDrive,
-                        child: const Text('Uit Drive'),
-                      ),
-                      FilledButton(
-                        onPressed: (_saving || _recordStarting) ? null : _toggleRecord,
-                        child: _recordStarting
-                            ? const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text('Starten...'),
-                                ],
-                              )
-                            : Text(_recording ? 'Stoppen' : 'Opnemen'),
-                      ),
-                      FilledButton.tonalIcon(
-                        onPressed: (_saving || _recordStarting || _recording || !canPreview)
-                            ? null
-                            : _togglePreviewPlay,
-                        icon: _audioDrivePreviewLoading
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : Icon(_isPreviewPlaying ? Icons.pause : Icons.play_arrow),
-                        label: Text(_audioDrivePreviewLoading ? 'Laden...' : 'Voorbeeld'),
-                      ),
-                    ],
-                  ),
-                ],
+                        FilledButton(
+                          onPressed: (_saving || _recordStarting) ? null : _toggleRecord,
+                          child: _recordStarting
+                              ? const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: <Widget>[
+                                    SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text('Starten...'),
+                                  ],
+                                )
+                              : Text(_recording ? 'Stoppen' : 'Opnemen'),
+                        ),
+                        FilledButton.tonalIcon(
+                          onPressed: (_saving || _recordStarting || _recording || !canPreview)
+                              ? null
+                              : _togglePreviewPlay,
+                          icon: _audioDrivePreviewLoading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : Icon(_isPreviewPlaying ? Icons.pause : Icons.play_arrow),
+                          label: Text(_audioDrivePreviewLoading ? 'Laden...' : 'Voorbeeld'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: _saving ? null : _save,

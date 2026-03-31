@@ -306,6 +306,8 @@ class TeacherRepository {
     required String teacherId,
     required String tabId,
     required String? title,
+    String? cardType,
+    String? cardDataJson,
     required String imageDriveFileId,
     required String audioDriveFileId,
     required String imageMimeType,
@@ -316,6 +318,9 @@ class TeacherRepository {
     if (imageDriveFileId.trim().isEmpty && audioDriveFileId.trim().isEmpty) {
       throw ArgumentError('Kies een afbeelding of audio (minstens één).');
     }
+    final type = (cardType == null || cardType.trim().isEmpty)
+        ? 'sound_image'
+        : cardType.trim();
     final models.Document doc = await databases.createDocument(
       databaseId: schema.databaseId,
       collectionId: schema.cardsCollectionId,
@@ -323,6 +328,8 @@ class TeacherRepository {
       data: <String, dynamic>{
         'tabId': tabId,
         'title': title,
+        'cardType': type,
+        'cardDataJson': (cardDataJson ?? '').trim(),
         'imageDriveFileId': imageDriveFileId,
         'audioDriveFileId': audioDriveFileId,
         'imageMimeType': imageMimeType,
@@ -376,6 +383,8 @@ class TeacherRepository {
   Future<CardItem> updateCard({
     required String cardId,
     required String? title,
+    String? cardType,
+    String? cardDataJson,
     required String imageDriveFileId,
     required String audioDriveFileId,
     required String imageMimeType,
@@ -385,12 +394,17 @@ class TeacherRepository {
     if (imageDriveFileId.trim().isEmpty && audioDriveFileId.trim().isEmpty) {
       throw ArgumentError('Kies een afbeelding of audio (minstens één).');
     }
+    final type = (cardType == null || cardType.trim().isEmpty)
+        ? 'sound_image'
+        : cardType.trim();
     final models.Document doc = await databases.updateDocument(
       databaseId: schema.databaseId,
       collectionId: schema.cardsCollectionId,
       documentId: cardId,
       data: <String, dynamic>{
         'title': title,
+        'cardType': type,
+        'cardDataJson': (cardDataJson ?? '').trim(),
         'imageDriveFileId': imageDriveFileId,
         'audioDriveFileId': audioDriveFileId,
         'imageMimeType': imageMimeType,

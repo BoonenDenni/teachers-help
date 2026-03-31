@@ -6,6 +6,8 @@ class CardItem {
     required this.id,
     required this.tabId,
     required this.title,
+    required this.cardType,
+    required this.cardDataJson,
     required this.imageDriveFileId,
     required this.audioDriveFileId,
     required this.imageMimeType,
@@ -19,6 +21,8 @@ class CardItem {
   final String id;
   final String tabId;
   final String? title;
+  final String cardType;
+  final String? cardDataJson;
   final String imageDriveFileId;
   final String audioDriveFileId;
   final String imageMimeType;
@@ -33,6 +37,8 @@ class CardItem {
       id: id,
       tabId: tabId,
       title: title,
+      cardType: cardType,
+      cardDataJson: cardDataJson,
       imageDriveFileId: imageDriveFileId,
       audioDriveFileId: audioDriveFileId,
       imageMimeType: imageMimeType,
@@ -45,10 +51,18 @@ class CardItem {
   }
 
   static CardItem fromDoc(Map<String, dynamic> doc) {
+    final String? rawType = doc['cardType'] as String?;
+    final String type = (rawType == null || rawType.trim().isEmpty)
+        ? 'sound_image'
+        : rawType.trim();
     return CardItem(
       id: doc['\$id'] as String,
       tabId: doc['tabId'] as String,
       title: doc['title'] as String?,
+      cardType: type,
+      cardDataJson: (doc['cardDataJson'] as String?)?.trim().isEmpty == true
+          ? null
+          : (doc['cardDataJson'] as String?),
       imageDriveFileId: doc['imageDriveFileId'] as String,
       audioDriveFileId: doc['audioDriveFileId'] as String,
       imageMimeType: doc['imageMimeType'] as String,

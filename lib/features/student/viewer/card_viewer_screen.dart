@@ -10,9 +10,11 @@ import '../../../services/audio/app_audio_player.dart';
 import '../../../services/appwrite/student_repository.dart';
 import '../../../services/drive/drive_api.dart';
 import '../../../domain/models/card_item.dart';
+import '../../../domain/cards/card_types.dart';
 import '../../../services/web/blob_url.dart';
 import '../../../utils/tab_color.dart';
 import '../../../domain/models/image_annotation.dart';
+import 'card_types/image_fill_in_view.dart';
 
 class CardViewerScreen extends ConsumerStatefulWidget {
   const CardViewerScreen({
@@ -36,6 +38,7 @@ class _CardViewerScreenState extends ConsumerState<CardViewerScreen> {
   int _index = 0;
   final AppAudioPlayer _player = AppAudioPlayer.create();
   bool _isPlaying = false;
+  bool? _fillInIsCorrect;
   final FocusNode _focusNode = FocusNode();
   final BlobUrl _blobUrl = BlobUrl.create();
 
@@ -147,6 +150,7 @@ class _CardViewerScreenState extends ConsumerState<CardViewerScreen> {
     if (next < 0 || next >= _cards.length) return;
     setState(() {
       _index = next;
+      _fillInIsCorrect = null;
     });
     _stopAudio();
     _primeForIndex(next);
@@ -250,6 +254,7 @@ class _CardViewerScreenState extends ConsumerState<CardViewerScreen> {
         : _dataUrlCache[card.imageDriveFileId];
     final bool hasPrev = _index > 0;
     final bool hasNext = _index < _cards.length - 1;
+    final type = CardTypeRegistry.normalizeType(card.cardType);
 
     final Color? accent = parseTabColorHex(widget.tabColorHex);
     final TextStyle? counterStyle = accent != null
@@ -287,94 +292,146 @@ class _CardViewerScreenState extends ConsumerState<CardViewerScreen> {
           }
           return KeyEventResult.ignored;
         },
-        child: Column(
-          children: <Widget>[
-            Expanded(
-              child: Center(
-                child: AspectRatio(
-                  aspectRatio: 1,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: ColoredBox(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .surfaceContainerHighest,
-                      child: imageUrl == null
-                          ? Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(20),
-                                child: Text(
-                                  (card.title == null || card.title!.trim().isEmpty)
-                                      ? '(zonder titel)'
-                                      : card.title!.trim(),
-                                  textAlign: TextAlign.center,
-                                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                      ),
-                                ),
-                              ),
-                            )
-                          : Stack(
-                              fit: StackFit.expand,
-                              children: <Widget>[
-                                Image.network(
-                                  imageUrl,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return const Center(
-                                      child: Text('Afbeelding laden mislukt'),
-                                    );
-                                  },
-                                ),
-                                LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final ann = ImageAnnotations.tryParse(card.imageAnnotationsJson);
-                                    if (ann == null || ann.items.isEmpty) {
-                                      return const SizedBox.shrink();
-                                    }
-                                    return CustomPaint(
-                                      painter: _ImageAnnotOverlayPainter(items: ann.items),
-                                    );
-                                  },
-                                ),
-                              ],
-                            ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: Row(
+        child: (type == CardTypeIds.imageFillIn)
+            ? Column(
                 children: <Widget>[
-                  IconButton.filledTonal(
-                    onPressed: hasPrev ? () => _go(_index - 1) : null,
-                    icon: const Icon(Icons.arrow_left),
-                    tooltip: 'Vorige',
-                  ),
-                  const SizedBox(width: 12),
                   Expanded(
-                    child: FilledButton.icon(
-                      onPressed: _dataUrlCache[card.audioDriveFileId] == null
-                          ? null
-                          : _togglePlay,
-                      icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
-                      label: Text(_isPlaying ? 'Pauze' : 'Geluid afspelen'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: ImageFillInCardView(
+                        card: card,
+                        imageUrl: imageUrl,
+                        onResultChanged: (v) {
+                          if (!mounted) return;
+                          setState(() => _fillInIsCorrect = v);
+                        },
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  IconButton.filledTonal(
-                    onPressed: hasNext ? () => _go(_index + 1) : null,
-                    icon: const Icon(Icons.arrow_right),
-                    tooltip: 'Volgende',
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: Row(
+                      children: <Widget>[
+                        IconButton.filledTonal(
+                          onPressed: hasPrev ? () => _go(_index - 1) : null,
+                          icon: const Icon(Icons.arrow_left),
+                          tooltip: 'Vorige',
+                        ),
+                        Expanded(
+                          child: Center(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 150),
+                              child: _fillInIsCorrect == null
+                                  ? const SizedBox.shrink()
+                                  : Icon(
+                                      _fillInIsCorrect!
+                                          ? Icons.sentiment_satisfied_alt_rounded
+                                          : Icons.sentiment_dissatisfied_rounded,
+                                      key: ValueKey<bool>(_fillInIsCorrect!),
+                                      size: 38,
+                                      color: _fillInIsCorrect!
+                                          ? Colors.green
+                                          : Theme.of(context).colorScheme.error,
+                                    ),
+                            ),
+                          ),
+                        ),
+                        IconButton.filledTonal(
+                          onPressed: hasNext ? () => _go(_index + 1) : null,
+                          icon: const Icon(Icons.arrow_right),
+                          tooltip: 'Volgende',
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                children: <Widget>[
+                  Expanded(
+                    child: Center(
+                      child: AspectRatio(
+                        aspectRatio: 1,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: ColoredBox(
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            child: imageUrl == null
+                                ? Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(20),
+                                      child: Text(
+                                        (card.title == null || card.title!.trim().isEmpty)
+                                            ? '(zonder titel)'
+                                            : card.title!.trim(),
+                                        textAlign: TextAlign.center,
+                                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                            ),
+                                      ),
+                                    ),
+                                  )
+                                : Stack(
+                                    fit: StackFit.expand,
+                                    children: <Widget>[
+                                      Image.network(
+                                        imageUrl,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return const Center(
+                                            child: Text('Afbeelding laden mislukt'),
+                                          );
+                                        },
+                                      ),
+                                      LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          final ann =
+                                              ImageAnnotations.tryParse(card.imageAnnotationsJson);
+                                          if (ann == null || ann.items.isEmpty) {
+                                            return const SizedBox.shrink();
+                                          }
+                                          return CustomPaint(
+                                            painter: _ImageAnnotOverlayPainter(items: ann.items),
+                                          );
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: Row(
+                      children: <Widget>[
+                        IconButton.filledTonal(
+                          onPressed: hasPrev ? () => _go(_index - 1) : null,
+                          icon: const Icon(Icons.arrow_left),
+                          tooltip: 'Vorige',
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _dataUrlCache[card.audioDriveFileId] == null ? null : _togglePlay,
+                            icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
+                            label: Text(_isPlaying ? 'Pauze' : 'Geluid afspelen'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        IconButton.filledTonal(
+                          onPressed: hasNext ? () => _go(_index + 1) : null,
+                          icon: const Icon(Icons.arrow_right),
+                          tooltip: 'Volgende',
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
       ),
     );
   }
