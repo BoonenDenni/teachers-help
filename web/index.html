@@ -33,16 +33,13 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
-  <!-- Google APIs for Drive Picker -->
-  <script src="https://apis.google.com/js/api.js"></script>
   <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
-
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
+    Load Flutter first. Do not put a blocking script before flutter_bootstrap.js:
+    a synchronous Google api.js blocks HTML parsing and can leave a white screen
+    until the Google CDN responds (or forever if blocked).
+    Drive Picker only needs gapi later; defer keeps order after Flutter loads.
   -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script src="flutter_bootstrap.js" defer></script>
+  <script src="https://apis.google.com/js/api.js" defer></script>
 </body>
 </html>

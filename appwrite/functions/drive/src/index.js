@@ -7,6 +7,8 @@ import {
   deleteDriveConnections,
   getClassByPublicToken,
   getDriveConnection,
+  logDeletedDriveItem,
+  markDeletedDriveItemRestored,
   upsertDriveConnection,
 } from './appwrite.js';
 import {
@@ -40,6 +42,19 @@ function requireUserId(req, res) {
     });
   }
   return userId;
+}
+
+function parseBodyJson(req) {
+  if (req.bodyJson && typeof req.bodyJson === 'object') return req.bodyJson;
+  const raw = req.body;
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  if (typeof raw !== 'string') return null;
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    return null;
+  }
 }
 
 export default async ({ req, res, log, error }) => {
@@ -111,6 +126,218 @@ export default async ({ req, res, log, error }) => {
       const databases = createDatabases(client);
       const deleted = await deleteDriveConnections({ databases, teacherId });
       return json(res, 200, { disconnected: deleted > 0 });
+    }
+
+    // GET /drive/root -> { rootFolderId: string }
+    if (req.method === 'GET' && path === '/drive/root') {
+      const teacherId = requireUserId(req, res);
+      if (typeof teacherId !== 'string') return teacherId;
+      const client = createAdminClient();
+      const databases = createDatabases(client);
+      const conn = await getDriveConnection({ databases, teacherId });
+      if (!conn) return json(res, 409, { error: 'NOT_CONNECTED', message: 'Google Drive not connected.' });
+      return json(res, 200, { rootFolderId: conn.rootFolderId || '' });
+    }
+
+    // POST /drive/root { rootFolderId } -> { ok: true }
+    if (req.method === 'POST' && path === '/drive/root') {
+      const teacherId = requireUserId(req, res);
+      if (typeof teacherId !== 'string') return teacherId;
+      const body = parseBodyJson(req) || {};
+      const { rootFolderId } = body;
+      if (typeof rootFolderId !== 'string' || rootFolderId.trim() === '') {
+        return json(res, 400, { error: 'BAD_REQUEST', message: 'Missing rootFolderId.' });
+      }
+      const client = createAdminClient();
+      const databases = createDatabases(client);
+      const conn = await getDriveConnection({ databases, teacherId });
+      if (!conn) return json(res, 409, { error: 'NOT_CONNECTED', message: 'Google Drive not connected.' });
+      await databases.updateDocument(
+        conn.$databaseId,
+        conn.$collectionId,
+        conn.$id,
+        { rootFolderId: rootFolderId.trim() },
+      );
+      return json(res, 200, { ok: true });
+    }
+
+    // POST /drive/folder/ensure
+    // body: { parentId?: string, name: string } -> { id, name }
+    if (req.method === 'POST' && path === '/drive/folder/ensure') {
+      const teacherId = requireUserId(req, res);
+      if (typeof teacherId !== 'string') return teacherId;
+      const body = parseBodyJson(req) || {};
+      const { parentId, name } = body;
+      if (typeof name !== 'string' || name.trim() === '') {
+        return json(res, 400, { error: 'BAD_REQUEST', message: 'Missing folder name.' });
+      }
+
+      const client = createAdminClient();
+      const databases = createDatabases(client);
+      const conn = await getDriveConnection({ databases, teacherId });
+      if (!conn) return json(res, 409, { error: 'NOT_CONNECTED', message: 'Google Drive not connected.' });
+
+      const refreshToken = decryptString(conn.refreshTokenEnc);
+      const drive = await driveClientFromRefreshToken(refreshToken);
+
+      const p = typeof parentId === 'string' && parentId.trim() !== '' ? parentId.trim() : 'root';
+      const folderName = name.trim();
+      const esc = folderName.replace(/'/g, "\\'");
+      const q = [
+        `trashed=false`,
+        `'${p}' in parents`,
+        `mimeType='application/vnd.google-apps.folder'`,
+        `name='${esc}'`,
+      ].join(' and ');
+
+      const listRes = await drive.files.list({
+        q,
+        fields: 'files(id,name)',
+        pageSize: 5,
+      });
+      const existing = Array.isArray(listRes.data.files) ? listRes.data.files[0] : null;
+      if (existing?.id) {
+        return json(res, 200, { id: existing.id, name: existing.name || folderName });
+      }
+
+      const createRes = await drive.files.create({
+        requestBody: {
+          name: folderName,
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: p === 'root' ? undefined : [p],
+        },
+        fields: 'id,name',
+      });
+      return json(res, 200, { id: createRes.data.id, name: createRes.data.name || folderName });
+    }
+
+    // POST /drive/folder/rename
+    // body: { folderId: string, newName: string } -> { ok: true }
+    if (req.method === 'POST' && path === '/drive/folder/rename') {
+      const teacherId = requireUserId(req, res);
+      if (typeof teacherId !== 'string') return teacherId;
+      const body = parseBodyJson(req) || {};
+      const { folderId, newName } = body;
+      if (typeof folderId !== 'string' || folderId.trim() === '') {
+        return json(res, 400, { error: 'BAD_REQUEST', message: 'Missing folderId.' });
+      }
+      if (typeof newName !== 'string' || newName.trim() === '') {
+        return json(res, 400, { error: 'BAD_REQUEST', message: 'Missing newName.' });
+      }
+      const client = createAdminClient();
+      const databases = createDatabases(client);
+      const conn = await getDriveConnection({ databases, teacherId });
+      if (!conn) return json(res, 409, { error: 'NOT_CONNECTED', message: 'Google Drive not connected.' });
+      const refreshToken = decryptString(conn.refreshTokenEnc);
+      const drive = await driveClientFromRefreshToken(refreshToken);
+      await drive.files.update({
+        fileId: folderId.trim(),
+        requestBody: { name: newName.trim() },
+      });
+      return json(res, 200, { ok: true });
+    }
+
+    // POST /drive/item/trash
+    // body: { fileId: string } -> { ok: true }
+    if (req.method === 'POST' && path === '/drive/item/trash') {
+      const teacherId = requireUserId(req, res);
+      if (typeof teacherId !== 'string') return teacherId;
+      const body = parseBodyJson(req) || {};
+      const { fileId } = body;
+      if (typeof fileId !== 'string' || fileId.trim() === '') {
+        return json(res, 400, { error: 'BAD_REQUEST', message: 'Missing fileId.' });
+      }
+      const client = createAdminClient();
+      const databases = createDatabases(client);
+      const conn = await getDriveConnection({ databases, teacherId });
+      if (!conn) return json(res, 409, { error: 'NOT_CONNECTED', message: 'Google Drive not connected.' });
+      const refreshToken = decryptString(conn.refreshTokenEnc);
+      const drive = await driveClientFromRefreshToken(refreshToken);
+      await drive.files.update({
+        fileId: fileId.trim(),
+        requestBody: { trashed: true },
+      });
+      return json(res, 200, { ok: true });
+    }
+
+    // POST /drive/item/restore
+    // body: { fileId: string } -> { ok: true }
+    if (req.method === 'POST' && path === '/drive/item/restore') {
+      const teacherId = requireUserId(req, res);
+      if (typeof teacherId !== 'string') return teacherId;
+      const body = parseBodyJson(req) || {};
+      const { fileId } = body;
+      if (typeof fileId !== 'string' || fileId.trim() === '') {
+        return json(res, 400, { error: 'BAD_REQUEST', message: 'Missing fileId.' });
+      }
+      const client = createAdminClient();
+      const databases = createDatabases(client);
+      const conn = await getDriveConnection({ databases, teacherId });
+      if (!conn) return json(res, 409, { error: 'NOT_CONNECTED', message: 'Google Drive not connected.' });
+      const refreshToken = decryptString(conn.refreshTokenEnc);
+      const drive = await driveClientFromRefreshToken(refreshToken);
+      await drive.files.update({
+        fileId: fileId.trim(),
+        requestBody: { trashed: false },
+      });
+      return json(res, 200, { ok: true });
+    }
+
+    // POST /drive/item/trash_and_log
+    // body: { fileId: string, name: string, kind: string } -> { ok: true }
+    if (req.method === 'POST' && path === '/drive/item/trash_and_log') {
+      const teacherId = requireUserId(req, res);
+      if (typeof teacherId !== 'string') return teacherId;
+      const body = parseBodyJson(req) || {};
+      const { fileId, name, kind } = body;
+      if (typeof fileId !== 'string' || fileId.trim() === '') {
+        return json(res, 400, { error: 'BAD_REQUEST', message: 'Missing fileId.' });
+      }
+      const client = createAdminClient();
+      const databases = createDatabases(client);
+      const conn = await getDriveConnection({ databases, teacherId });
+      if (!conn) return json(res, 409, { error: 'NOT_CONNECTED', message: 'Google Drive not connected.' });
+      const refreshToken = decryptString(conn.refreshTokenEnc);
+      const drive = await driveClientFromRefreshToken(refreshToken);
+      await drive.files.update({
+        fileId: fileId.trim(),
+        requestBody: { trashed: true },
+      });
+      await logDeletedDriveItem({
+        databases,
+        teacherId,
+        driveFileId: fileId.trim(),
+        name: typeof name === 'string' && name.trim() !== '' ? name.trim() : 'item',
+        kind: typeof kind === 'string' && kind.trim() !== '' ? kind.trim() : 'unknown',
+      });
+      return json(res, 200, { ok: true });
+    }
+
+    // POST /drive/item/restore_and_mark
+    // body: { fileId: string, deletedItemId: string } -> { ok: true }
+    if (req.method === 'POST' && path === '/drive/item/restore_and_mark') {
+      const teacherId = requireUserId(req, res);
+      if (typeof teacherId !== 'string') return teacherId;
+      const body = parseBodyJson(req) || {};
+      const { fileId, deletedItemId } = body;
+      if (typeof fileId !== 'string' || fileId.trim() === '') {
+        return json(res, 400, { error: 'BAD_REQUEST', message: 'Missing fileId.' });
+      }
+      if (typeof deletedItemId !== 'string' || deletedItemId.trim() === '') {
+        return json(res, 400, { error: 'BAD_REQUEST', message: 'Missing deletedItemId.' });
+      }
+      const client = createAdminClient();
+      const databases = createDatabases(client);
+      const conn = await getDriveConnection({ databases, teacherId });
+      if (!conn) return json(res, 409, { error: 'NOT_CONNECTED', message: 'Google Drive not connected.' });
+      const refreshToken = decryptString(conn.refreshTokenEnc);
+      const drive = await driveClientFromRefreshToken(refreshToken);
+      await drive.files.update({
+        fileId: fileId.trim(),
+        requestBody: { trashed: false },
+      });
+      await markDeletedDriveItemRestored({ databases, deletedItemId: deletedItemId.trim() });
+      return json(res, 200, { ok: true });
     }
 
     // GET /oauth/token -> { accessToken }

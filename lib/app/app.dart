@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
 import 'router.dart';
 
@@ -8,8 +7,6 @@ class TeachersHelpApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final GoRouter router = buildRouter();
-
     return MaterialApp.router(
       title: 'Lerarenhulp',
       debugShowCheckedModeBanner: false,
@@ -17,7 +14,7 @@ class TeachersHelpApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2E6CF6)),
         useMaterial3: true,
       ),
-      routerConfig: router,
+      routerConfig: teachersHelpRouter,
     );
   }
 }

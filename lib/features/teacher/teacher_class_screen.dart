@@ -9,6 +9,7 @@ import '../../domain/models/tab_category.dart';
 import '../../domain/models/teachers_class.dart';
 import '../../services/appwrite/auth_controller.dart';
 import '../../services/appwrite/teacher_repository.dart';
+import '../../services/drive/drive_api.dart';
 import '../../utils/tab_color.dart';
 import '../../widgets/tab_color_picker_dialog.dart';
 import 'teacher_navigation.dart';
@@ -185,7 +186,7 @@ class _TeacherClassScreenState extends ConsumerState<TeacherClassScreen> {
         title: Text(widget.clazz.name),
         actions: <Widget>[
           Tooltip(
-            message: 'Startpagina Lerarenhulp — leerlingtoegang, ping, leraar inloggen',
+            message: 'Startpagina Lerarenhulp — leerlingtoegang, leraar inloggen',
             child: TextButton.icon(
               onPressed: () => goToTeachersHelpStart(context),
               icon: const Icon(Icons.home_rounded),
@@ -387,7 +388,7 @@ class _TeacherClassScreenState extends ConsumerState<TeacherClassScreen> {
                       if (!context.mounted) return;
                       final sortOrder = tabs.length;
                       try {
-                        await repo.createTab(
+                        final created = await repo.createTab(
                           teacherId: widget.userId,
                           classId: widget.clazz.id,
                           title: title,
@@ -395,8 +396,39 @@ class _TeacherClassScreenState extends ConsumerState<TeacherClassScreen> {
                           tabColorHex:
                               pickedHex == null || pickedHex.isEmpty ? null : pickedHex,
                         );
+                        try {
+                          final drive = ref.read(driveApiProvider);
+                          final root = await drive.getRootFolderId();
+                          if (root.trim().isNotEmpty) {
+                            final appFolder = await drive.ensureFolder(parentId: root, name: 'Teachers Help');
+                            final classesFolder = await drive.ensureFolder(parentId: appFolder, name: 'Klassen');
+                            final classFolder = widget.clazz.driveFolderId?.trim().isNotEmpty == true
+                                ? widget.clazz.driveFolderId!.trim()
+                                : await drive.ensureFolder(parentId: classesFolder, name: widget.clazz.name);
+                            if (widget.clazz.driveFolderId == null || widget.clazz.driveFolderId!.trim().isEmpty) {
+                              await repo.setClassDriveFolderId(classId: widget.clazz.id, driveFolderId: classFolder);
+                            }
+                            final tabsFolder = await drive.ensureFolder(parentId: classFolder, name: 'Tabbladen');
+                            final tabFolder = await drive.ensureFolder(parentId: tabsFolder, name: created.title);
+                            await repo.setTabDriveFolderId(tabId: created.id, driveFolderId: tabFolder);
+                          }
+                        } catch (_) {
+                          // Best effort.
+                        }
                         if (!context.mounted) return;
-                        _refreshTabs();
+                        // Optimistically update UI to avoid eventual-consistency delays.
+                        setState(() {
+                          final next = <TabCategory>[...tabs, created]
+                            ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+                          _tabsFuture = Future.value(next);
+                        });
+
+                        // Also refresh from backend in the background.
+                        // ignore: unawaited_futures
+                        Future<void>.delayed(const Duration(milliseconds: 400), () async {
+                          if (!mounted) return;
+                          _refreshTabs();
+                        });
                       } catch (e) {
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -451,7 +483,12 @@ class _TeacherClassScreenState extends ConsumerState<TeacherClassScreen> {
                             );
                             if (title == null) return;
                             try {
-                              await repo.updateTabTitle(tabId: t.id, title: title);
+                              final updated = await repo.updateTabTitle(tabId: t.id, title: title);
+                              final folderId = updated.driveFolderId?.trim();
+                              if (folderId != null && folderId.isNotEmpty) {
+                                final drive = ref.read(driveApiProvider);
+                                await drive.renameFolder(folderId: folderId, newName: updated.title);
+                              }
                               if (!context.mounted) return;
                               _refreshTabs();
                             } catch (e) {
@@ -490,6 +527,15 @@ class _TeacherClassScreenState extends ConsumerState<TeacherClassScreen> {
                                 false;
                             if (!ok) return;
                             try {
+                              final folderId = t.driveFolderId?.trim();
+                              if (folderId != null && folderId.isNotEmpty) {
+                                final drive = ref.read(driveApiProvider);
+                                await drive.trashAndLog(
+                                  fileId: folderId,
+                                  name: t.title,
+                                  kind: 'tab-folder',
+                                );
+                              }
                               await repo.deleteTabCascade(tabId: t.id);
                               if (!context.mounted) return;
                               _refreshTabs();

@@ -104,5 +104,74 @@ class _WebDrivePicker implements DrivePickerService {
 
     return completer.future;
   }
+
+  @override
+  Future<DrivePickedFolder?> pickFolder({
+    required String googleApiKey,
+    required String oauthAccessToken,
+  }) async {
+    if (!kIsWeb) throw UnsupportedError('Drive Picker is only supported on web.');
+    if (googleApiKey.isEmpty) {
+      throw StateError('Missing GOOGLE_API_KEY (dart-define).');
+    }
+    if (oauthAccessToken.isEmpty) {
+      throw StateError('Missing OAuth access token.');
+    }
+
+    await _loadPicker();
+
+    final google = js.context['google'];
+    final pickerNs = google['picker'];
+
+    // Folder picker view.
+    final viewId = pickerNs['ViewId']['FOLDERS'];
+    final view = js.JsObject(pickerNs['View'], <dynamic>[viewId]);
+    // Ensure folders are selectable.
+    view.callMethod('setIncludeFolders', const <dynamic>[true]);
+    view.callMethod('setSelectFolderEnabled', const <dynamic>[true]);
+
+    final completer = Completer<DrivePickedFolder?>();
+
+    final actionPicked = pickerNs['Action']['PICKED'];
+    final actionCancel = pickerNs['Action']['CANCEL'];
+    final respDocs = pickerNs['Response']['DOCUMENTS'];
+    final docIdKey = pickerNs['Document']['ID'];
+    final docNameKey = pickerNs['Document']['NAME'];
+
+    void callback(dynamic data) {
+      final action = data['action'];
+      if (action == actionCancel) {
+        completer.complete(null);
+        return;
+      }
+      if (action != actionPicked) return;
+
+      final docs = data[respDocs] as List<dynamic>?;
+      if (docs == null || docs.isEmpty) {
+        completer.complete(null);
+        return;
+      }
+      final doc = docs.first;
+      final id = doc[docIdKey] as String?;
+      if (id == null || id.isEmpty) {
+        completer.complete(null);
+        return;
+      }
+      final name = (doc[docNameKey] as String?) ?? 'folder';
+      completer.complete(DrivePickedFolder(id: id, name: name));
+    }
+
+    final builder = js.JsObject(pickerNs['PickerBuilder']);
+    builder.callMethod('addView', <dynamic>[view]);
+    builder.callMethod('setOAuthToken', <dynamic>[oauthAccessToken]);
+    builder.callMethod('setDeveloperKey', <dynamic>[googleApiKey]);
+    builder.callMethod('setCallback', <dynamic>[callback]);
+    builder.callMethod('setOrigin', <dynamic>[html.window.location.origin]);
+
+    final picker = builder.callMethod('build', const <dynamic>[]);
+    picker.callMethod('setVisible', const <dynamic>[true]);
+
+    return completer.future;
+  }
 }
 

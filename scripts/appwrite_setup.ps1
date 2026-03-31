@@ -45,12 +45,17 @@ cmd /c "appwrite databases get-collection --database-id $DatabaseId --collection
 if ($LASTEXITCODE -ne 0) {
   appwrite databases create-collection --database-id $DatabaseId --collection-id "drive_connections" --name "Drive Connections" --document-security true
 }
+cmd /c "appwrite databases get-collection --database-id $DatabaseId --collection-id deleted_drive_items >nul 2>nul"
+if ($LASTEXITCODE -ne 0) {
+  appwrite databases create-collection --database-id $DatabaseId --collection-id "deleted_drive_items" --name "Deleted Drive Items" --document-security true
+}
 
 # Attributes and indexes
 # classes
 appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "classes" --key "teacherId" --size 64 --required true
 appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "classes" --key "name" --size 128 --required true
 appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "classes" --key "publicToken" --size 64 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "classes" --key "driveFolderId" --size 128 --required false
 appwrite databases create-index --database-id $DatabaseId --collection-id "classes" --key "byTeacher" --type "key" --attributes "teacherId"
 appwrite databases create-index --database-id $DatabaseId --collection-id "classes" --key "byPublicToken" --type "unique" --attributes "publicToken"
 
@@ -59,16 +64,19 @@ appwrite databases create-string-attribute --database-id $DatabaseId --collectio
 appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "tabs" --key "title" --size 128 --required true
 appwrite databases create-integer-attribute --database-id $DatabaseId --collection-id "tabs" --key "sortOrder" --required true --min 0 --max 100000
 appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "tabs" --key "tabColorHex" --size 16 --required false
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "tabs" --key "driveFolderId" --size 128 --required false
 appwrite databases create-index --database-id $DatabaseId --collection-id "tabs" --key "byClass" --type "key" --attributes "classId"
 appwrite databases create-index --database-id $DatabaseId --collection-id "tabs" --key "byClassAndSort" --type "key" --attributes "classId" "sortOrder"
 
 # cards
 appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "tabId" --size 64 --required true
 appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "title" --size 128 --required false
-appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "imageDriveFileId" --size 128 --required true
-appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "audioDriveFileId" --size 128 --required true
-appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "imageMimeType" --size 64 --required true
-appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "audioMimeType" --size 64 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "imageDriveFileId" --size 128 --required false
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "audioDriveFileId" --size 128 --required false
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "imageMimeType" --size 64 --required false
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "audioMimeType" --size 64 --required false
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "imageAnnotationsJson" --size 20000 --required false
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "cards" --key "driveFolderId" --size 128 --required false
 appwrite databases create-integer-attribute --database-id $DatabaseId --collection-id "cards" --key "sortOrder" --required true --min 0 --max 100000
 appwrite databases create-datetime-attribute --database-id $DatabaseId --collection-id "cards" --key "createdAt" --required true
 appwrite databases create-index --database-id $DatabaseId --collection-id "cards" --key "byTab" --type "key" --attributes "tabId"
@@ -78,7 +86,17 @@ appwrite databases create-index --database-id $DatabaseId --collection-id "cards
 appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "drive_connections" --key "teacherId" --size 64 --required true
 appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "drive_connections" --key "googleUserId" --size 128 --required true
 appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "drive_connections" --key "refreshTokenEnc" --size 4096 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "drive_connections" --key "rootFolderId" --size 128 --required false
 appwrite databases create-index --database-id $DatabaseId --collection-id "drive_connections" --key "byTeacher" --type "unique" --attributes "teacherId"
+
+# deleted_drive_items
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "deleted_drive_items" --key "teacherId" --size 64 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "deleted_drive_items" --key "driveFileId" --size 128 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "deleted_drive_items" --key "name" --size 256 --required true
+appwrite databases create-string-attribute --database-id $DatabaseId --collection-id "deleted_drive_items" --key "kind" --size 64 --required true
+appwrite databases create-datetime-attribute --database-id $DatabaseId --collection-id "deleted_drive_items" --key "deletedAt" --required true
+appwrite databases create-datetime-attribute --database-id $DatabaseId --collection-id "deleted_drive_items" --key "restoredAt" --required false
+appwrite databases create-index --database-id $DatabaseId --collection-id "deleted_drive_items" --key "byTeacherAndDeletedAt" --type "key" --attributes "teacherId" "deletedAt"
 
 Write-Host "Done. Next: configure permissions per-doc for public student link access."
 

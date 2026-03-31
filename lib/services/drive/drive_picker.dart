@@ -12,6 +12,13 @@ class DrivePickedFile {
   final String mimeType;
 }
 
+class DrivePickedFolder {
+  const DrivePickedFolder({required this.id, required this.name});
+
+  final String id;
+  final String name;
+}
+
 abstract class DrivePickerService {
   static DrivePickerService create() => createDrivePickerService();
 
@@ -19,6 +26,11 @@ abstract class DrivePickerService {
     required String googleApiKey,
     required String oauthAccessToken,
     required bool isImage,
+  });
+
+  Future<DrivePickedFolder?> pickFolder({
+    required String googleApiKey,
+    required String oauthAccessToken,
   });
 }
 

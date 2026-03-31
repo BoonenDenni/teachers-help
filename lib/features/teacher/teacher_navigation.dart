@@ -6,7 +6,7 @@ void popToTeacherClassList(BuildContext context) {
   Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
 }
 
-/// Main [LoginScreen]: student class code, ping, continue as teacher.
+/// Main [LoginScreen]: student class code, continue as teacher.
 void goToTeachersHelpStart(BuildContext context) {
   context.go('/login');
 }

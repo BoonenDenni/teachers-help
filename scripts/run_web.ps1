@@ -1,16 +1,4 @@
-param(
-  [string]$Endpoint = "https://cloud.appwrite.io/v1",
-  [Parameter(Mandatory = $true)][string]$ProjectId
-)
-
-$ErrorActionPreference = "Stop"
-
-Push-Location (Split-Path $PSScriptRoot -Parent)
-try {
-  flutter run -d chrome `
-    --dart-define=APPWRITE_ENDPOINT="$Endpoint" `
-    --dart-define=APPWRITE_PROJECT_ID="$ProjectId"
-} finally {
-  Pop-Location
-}
-
+# Local Flutter web with CanvasKit bundled (avoids blank screen when gstatic CDN is blocked/slow).
+# Usage: .\scripts\run_web.ps1 --dart-define=GOOGLE_API_KEY="your-key"
+Set-Location (Join-Path $PSScriptRoot "..")
+flutter run -d edge --no-web-resources-cdn @args
