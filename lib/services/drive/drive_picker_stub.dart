@@ -11,5 +11,13 @@ class _UnsupportedDrivePicker implements DrivePickerService {
   }) {
     throw UnsupportedError('Drive Picker is only supported on Flutter Web.');
   }
+
+  @override
+  Future<DrivePickedFolder?> pickFolder({
+    required String googleApiKey,
+    required String oauthAccessToken,
+  }) {
+    throw UnsupportedError('Drive Picker is only supported on Flutter Web.');
+  }
 }
 

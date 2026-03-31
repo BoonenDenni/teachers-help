@@ -124,6 +124,7 @@ class TeacherRepository {
         'teacherId': teacherId,
         'name': name,
         'publicToken': publicToken,
+        'driveFolderId': '',
       },
       permissions: <String>[
         Permission.read(Role.any()),
@@ -152,6 +153,15 @@ class TeacherRepository {
       },
     );
     return TeachersClass.fromDoc(doc.data);
+  }
+
+  Future<void> setClassDriveFolderId({required String classId, required String driveFolderId}) async {
+    await databases.updateDocument(
+      databaseId: schema.databaseId,
+      collectionId: schema.classesCollectionId,
+      documentId: classId,
+      data: <String, dynamic>{'driveFolderId': driveFolderId.trim()},
+    );
   }
 
   Future<void> deleteClassCascade({required String classId}) async {
@@ -189,6 +199,7 @@ class TeacherRepository {
       'classId': classId,
       'title': title,
       'sortOrder': sortOrder,
+      'driveFolderId': '',
     };
     final String? hex = tabColorHex?.trim();
     if (hex != null && hex.isNotEmpty) {
@@ -230,6 +241,15 @@ class TeacherRepository {
       },
     );
     return TabCategory.fromDoc(doc.data);
+  }
+
+  Future<void> setTabDriveFolderId({required String tabId, required String driveFolderId}) async {
+    await databases.updateDocument(
+      databaseId: schema.databaseId,
+      collectionId: schema.tabsCollectionId,
+      documentId: tabId,
+      data: <String, dynamic>{'driveFolderId': driveFolderId.trim()},
+    );
   }
 
   Future<TabCategory> updateTabColor({
@@ -290,8 +310,12 @@ class TeacherRepository {
     required String audioDriveFileId,
     required String imageMimeType,
     required String audioMimeType,
+    String? imageAnnotationsJson,
     required int sortOrder,
   }) async {
+    if (imageDriveFileId.trim().isEmpty && audioDriveFileId.trim().isEmpty) {
+      throw ArgumentError('Kies een afbeelding of audio (minstens één).');
+    }
     final models.Document doc = await databases.createDocument(
       databaseId: schema.databaseId,
       collectionId: schema.cardsCollectionId,
@@ -303,6 +327,8 @@ class TeacherRepository {
         'audioDriveFileId': audioDriveFileId,
         'imageMimeType': imageMimeType,
         'audioMimeType': audioMimeType,
+        'imageAnnotationsJson': imageAnnotationsJson ?? '',
+        'driveFolderId': '',
         'sortOrder': sortOrder,
         'createdAt': DateTime.now().toUtc().toIso8601String(),
       },
@@ -314,6 +340,15 @@ class TeacherRepository {
       ],
     );
     return CardItem.fromDoc(doc.data);
+  }
+
+  Future<void> setCardDriveFolderId({required String cardId, required String driveFolderId}) async {
+    await databases.updateDocument(
+      databaseId: schema.databaseId,
+      collectionId: schema.cardsCollectionId,
+      documentId: cardId,
+      data: <String, dynamic>{'driveFolderId': driveFolderId.trim()},
+    );
   }
 
   Future<void> deleteCard({required String cardId}) async {
@@ -345,7 +380,11 @@ class TeacherRepository {
     required String audioDriveFileId,
     required String imageMimeType,
     required String audioMimeType,
+    String? imageAnnotationsJson,
   }) async {
+    if (imageDriveFileId.trim().isEmpty && audioDriveFileId.trim().isEmpty) {
+      throw ArgumentError('Kies een afbeelding of audio (minstens één).');
+    }
     final models.Document doc = await databases.updateDocument(
       databaseId: schema.databaseId,
       collectionId: schema.cardsCollectionId,
@@ -356,6 +395,7 @@ class TeacherRepository {
         'audioDriveFileId': audioDriveFileId,
         'imageMimeType': imageMimeType,
         'audioMimeType': audioMimeType,
+        'imageAnnotationsJson': imageAnnotationsJson ?? '',
       },
     );
     return CardItem.fromDoc(doc.data);

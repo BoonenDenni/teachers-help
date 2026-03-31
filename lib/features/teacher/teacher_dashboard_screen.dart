@@ -6,6 +6,9 @@ import '../../domain/models/teachers_class.dart';
 import '../../services/appwrite/auth_controller.dart';
 import '../../services/appwrite/teacher_repository.dart';
 import '../../services/drive/drive_api.dart';
+import '../../services/appwrite/appwrite_providers.dart';
+import '../../services/drive/drive_picker.dart';
+import 'drive_restore_screen.dart';
 import 'teacher_class_screen.dart';
 import 'teacher_navigation.dart';
 
@@ -20,17 +23,75 @@ class TeacherDashboardScreen extends ConsumerStatefulWidget {
 
 class _TeacherDashboardScreenState extends ConsumerState<TeacherDashboardScreen> {
   Future<bool>? _connectionFuture;
+  Future<String>? _rootFolderFuture;
+  final DrivePickerService _drivePicker = DrivePickerService.create();
 
   @override
   void initState() {
     super.initState();
     _connectionFuture = ref.read(driveApiProvider).getConnectionStatus();
+    _rootFolderFuture = ref.read(driveApiProvider).getRootFolderId();
   }
 
   void _refreshConnection() {
     setState(() {
       _connectionFuture = ref.read(driveApiProvider).getConnectionStatus();
     });
+  }
+
+  void _refreshRootFolder() {
+    setState(() {
+      _rootFolderFuture = ref.read(driveApiProvider).getRootFolderId();
+    });
+  }
+
+  Future<String?> _promptFolderId(BuildContext context) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Drive-map instellen'),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(
+              labelText: 'Folder ID of Drive-link',
+              hintText: 'Bijv. https://drive.google.com/drive/folders/<id>',
+              border: OutlineInputBorder(),
+            ),
+            autofocus: true,
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Annuleren'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+              child: const Text('Opslaan'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    final raw = result?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    final m = RegExp(r'/folders/([a-zA-Z0-9_-]+)').firstMatch(raw);
+    final id = (m != null) ? m.group(1) : raw;
+    return (id == null || id.trim().isEmpty) ? null : id.trim();
+  }
+
+  Future<String?> _pickDriveFolderId() async {
+    // Folder picker requires web + api key + oauth token.
+    final config = ref.read(appConfigProvider);
+    final drive = ref.read(driveApiProvider);
+    final token = await drive.getAccessToken();
+    final picked = await _drivePicker.pickFolder(
+      googleApiKey: config.googleApiKey,
+      oauthAccessToken: token,
+    );
+    return picked?.id;
   }
 
   @override
@@ -43,7 +104,7 @@ class _TeacherDashboardScreenState extends ConsumerState<TeacherDashboardScreen>
         title: const Text('Jouw klassen'),
         actions: <Widget>[
           IconButton(
-            tooltip: 'Startpagina Lerarenhulp (leerlingentoegang, ping)',
+            tooltip: 'Startpagina Lerarenhulp (leerlingentoegang)',
             onPressed: () => goToTeachersHelpStart(context),
             icon: const Icon(Icons.home_outlined),
           ),
@@ -82,81 +143,183 @@ class _TeacherDashboardScreenState extends ConsumerState<TeacherDashboardScreen>
                       FutureBuilder<bool>(
                         future: _connectionFuture,
                         builder: (context, s) {
+                          final loading = s.connectionState != ConnectionState.done;
+                          final hasError = s.hasError;
                           final connected = s.data == true;
-                          return Row(
+
+                          final Color statusColor;
+                          final IconData statusIcon;
+                          final String statusText;
+                          if (loading) {
+                            statusColor = Theme.of(context).colorScheme.primary;
+                            statusIcon = Icons.hourglass_top;
+                            statusText = 'Controleren…';
+                          } else if (hasError) {
+                            statusColor = Theme.of(context).colorScheme.error;
+                            statusIcon = Icons.warning_amber;
+                            statusText = 'Status onbekend';
+                          } else if (connected) {
+                            statusColor = Colors.green;
+                            statusIcon = Icons.check_circle;
+                            statusText = 'Verbonden';
+                          } else {
+                            statusColor = Theme.of(context).colorScheme.error;
+                            statusIcon = Icons.error;
+                            statusText = 'Nog niet verbonden';
+                          }
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
-                              Icon(
-                                connected ? Icons.check_circle : Icons.error,
-                                color: connected
-                                    ? Colors.green
-                                    : Theme.of(context).colorScheme.error,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  connected
-                                      ? 'Verbonden'
-                                      : 'Nog niet verbonden',
-                                ),
-                              ),
-                              if (!connected)
-                                FilledButton.tonal(
-                                  onPressed: () async {
-                                    final url = await drive.getOAuthStartUrl();
-                                    if (!context.mounted) return;
-                                    await Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (_) => _OAuthLaunchScreen(url: url),
-                                      ),
-                                    );
-                                    if (!mounted) return;
-                                    _refreshConnection();
-                                  },
-                                  child: const Text('Verbinden'),
-                                )
-                              else
-                                FilledButton.tonal(
-                                  style: FilledButton.styleFrom(
-                                    foregroundColor: Theme.of(context).colorScheme.error,
-                                  ),
-                                  onPressed: () async {
-                                    final ok = await showDialog<bool>(
-                                          context: context,
-                                          builder: (context) => AlertDialog(
-                                            title: const Text('Google Drive loskoppelen?'),
-                                            content: const Text(
-                                              'Hiermee wordt je opgeslagen verbinding verwijderd. Je kunt later opnieuw verbinden.',
-                                            ),
-                                            actions: <Widget>[
-                                              TextButton(
-                                                onPressed: () => Navigator.of(context).pop(false),
-                                                child: const Text('Annuleren'),
-                                              ),
-                                              FilledButton(
-                                                style: FilledButton.styleFrom(
-                                                  backgroundColor: Theme.of(context).colorScheme.error,
-                                                  foregroundColor: Theme.of(context).colorScheme.onError,
-                                                ),
-                                                onPressed: () => Navigator.of(context).pop(true),
-                                                child: const Text('Loskoppelen'),
-                                              ),
-                                            ],
+                              Row(
+                                children: <Widget>[
+                                  Icon(statusIcon, color: statusColor),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: Text(statusText)),
+                                  if (loading)
+                                    const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  else if (hasError)
+                                    FilledButton.tonal(
+                                      onPressed: _refreshConnection,
+                                      child: const Text('Opnieuw'),
+                                    )
+                                  else if (!connected)
+                                    FilledButton.tonal(
+                                      onPressed: () async {
+                                        final url = await drive.getOAuthStartUrl();
+                                        if (!context.mounted) return;
+                                        await Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) => _OAuthLaunchScreen(url: url),
                                           ),
-                                        ) ??
-                                        false;
-                                    if (!ok) return;
-                                    try {
-                                      await drive.disconnect();
-                                      if (!mounted) return;
-                                      _refreshConnection();
-                                    } catch (e) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Loskoppelen mislukt: $e')),
+                                        );
+                                        if (!mounted) return;
+                                        _refreshConnection();
+                                        _refreshRootFolder();
+                                      },
+                                      child: const Text('Verbinden'),
+                                    )
+                                  else
+                                    FilledButton.tonal(
+                                      style: FilledButton.styleFrom(
+                                        foregroundColor: Theme.of(context).colorScheme.error,
+                                      ),
+                                      onPressed: () async {
+                                        final ok = await showDialog<bool>(
+                                              context: context,
+                                              builder: (context) => AlertDialog(
+                                                title: const Text('Google Drive loskoppelen?'),
+                                                content: const Text(
+                                                  'Hiermee wordt je opgeslagen verbinding verwijderd. Je kunt later opnieuw verbinden.',
+                                                ),
+                                                actions: <Widget>[
+                                                  TextButton(
+                                                    onPressed: () => Navigator.of(context).pop(false),
+                                                    child: const Text('Annuleren'),
+                                                  ),
+                                                  FilledButton(
+                                                    style: FilledButton.styleFrom(
+                                                      backgroundColor: Theme.of(context).colorScheme.error,
+                                                      foregroundColor: Theme.of(context).colorScheme.onError,
+                                                    ),
+                                                    onPressed: () => Navigator.of(context).pop(true),
+                                                    child: const Text('Loskoppelen'),
+                                                  ),
+                                                ],
+                                              ),
+                                            ) ??
+                                            false;
+                                        if (!ok) return;
+                                        try {
+                                          await drive.disconnect();
+                                          if (!mounted) return;
+                                          _refreshConnection();
+                                          _refreshRootFolder();
+                                        } catch (e) {
+                                          if (!mounted) return;
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text('Loskoppelen mislukt: $e')),
+                                          );
+                                        }
+                                      },
+                                      child: const Text('Loskoppelen'),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              FutureBuilder<String>(
+                                future: _rootFolderFuture,
+                                builder: (context, r) {
+                                  final loadingRoot = r.connectionState != ConnectionState.done;
+                                  final root = (r.data ?? '').trim();
+                                  if (!connected) {
+                                    return const Text('Koppel Drive om een uploadmap in te stellen.');
+                                  }
+                                  return Row(
+                                    children: <Widget>[
+                                      Expanded(
+                                        child: Text(
+                                          root.isEmpty
+                                              ? 'Uploadmap: niet ingesteld'
+                                              : 'Uploadmap: ingesteld',
+                                        ),
+                                      ),
+                                      if (loadingRoot)
+                                        const SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        )
+                                      else
+                                        FilledButton.tonal(
+                                          onPressed: () async {
+                                            String? id;
+                                            try {
+                                              id = await _pickDriveFolderId();
+                                            } catch (_) {
+                                              id = null;
+                                            }
+                                            id ??= await _promptFolderId(context);
+                                            if (id == null || !context.mounted) return;
+                                            try {
+                                              await drive.setRootFolderId(id);
+                                              if (!context.mounted) return;
+                                              _refreshRootFolder();
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                const SnackBar(content: Text('Uploadmap ingesteld.')),
+                                              );
+                                            } catch (e) {
+                                              if (!context.mounted) return;
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(content: Text('Uploadmap instellen mislukt: $e')),
+                                              );
+                                            }
+                                          },
+                                          child: Text(root.isEmpty ? 'Instellen' : 'Wijzigen'),
+                                        ),
+                                    ],
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 12),
+                              if (connected)
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: FilledButton.tonalIcon(
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) => DriveRestoreScreen(userId: widget.userId),
+                                        ),
                                       );
-                                    }
-                                  },
-                                  child: const Text('Loskoppelen'),
+                                    },
+                                    icon: const Icon(Icons.restore),
+                                    label: const Text('Herstel Drive items'),
+                                  ),
                                 ),
                             ],
                           );
@@ -187,11 +350,22 @@ class _TeacherDashboardScreenState extends ConsumerState<TeacherDashboardScreen>
                       if (name == null) return;
                       final authUser = ref.read(authControllerProvider).value;
                       final teacherLabel = (authUser?.name ?? 'Leraar').trim();
-                      await repo.createClass(
+                      final created = await repo.createClass(
                         teacherId: widget.userId,
                         name: name,
                         teacherNameForToken: teacherLabel.isEmpty ? 'Leraar' : teacherLabel,
                       );
+                      try {
+                        final root = await drive.getRootFolderId();
+                        if (root.trim().isNotEmpty) {
+                          final appFolder = await drive.ensureFolder(parentId: root, name: 'Teachers Help');
+                          final classesFolder = await drive.ensureFolder(parentId: appFolder, name: 'Klassen');
+                          final classFolder = await drive.ensureFolder(parentId: classesFolder, name: created.name);
+                          await repo.setClassDriveFolderId(classId: created.id, driveFolderId: classFolder);
+                        }
+                      } catch (_) {
+                        // Best effort: class can exist without a Drive folder mapping.
+                      }
                       if (!context.mounted) return;
                       Navigator.of(context).pushReplacement(
                         MaterialPageRoute<void>(
@@ -227,7 +401,11 @@ class _TeacherDashboardScreenState extends ConsumerState<TeacherDashboardScreen>
                             );
                             if (newName == null) return;
                             try {
-                              await repo.updateClassName(classId: c.id, name: newName);
+                              final updated = await repo.updateClassName(classId: c.id, name: newName);
+                              final folderId = updated.driveFolderId?.trim();
+                              if (folderId != null && folderId.isNotEmpty) {
+                                await drive.renameFolder(folderId: folderId, newName: updated.name);
+                              }
                               if (!context.mounted) return;
                               Navigator.of(context).pushReplacement(
                                 MaterialPageRoute<void>(
@@ -268,6 +446,14 @@ class _TeacherDashboardScreenState extends ConsumerState<TeacherDashboardScreen>
                                 false;
                             if (!ok) return;
                             try {
+                              final folderId = c.driveFolderId?.trim();
+                              if (folderId != null && folderId.isNotEmpty) {
+                                await drive.trashAndLog(
+                                  fileId: folderId,
+                                  name: c.name,
+                                  kind: 'class-folder',
+                                );
+                              }
                               await repo.deleteClassCascade(classId: c.id);
                               if (!context.mounted) return;
                               Navigator.of(context).pushReplacement(

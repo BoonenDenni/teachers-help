@@ -21,6 +21,10 @@ export function schemaIds() {
       'APPWRITE_DRIVE_CONNECTIONS_COLLECTION_ID',
       'drive_connections',
     ),
+    deletedDriveItemsCollectionId: env(
+      'APPWRITE_DELETED_DRIVE_ITEMS_COLLECTION_ID',
+      'deleted_drive_items',
+    ),
     classesCollectionId: env('APPWRITE_CLASSES_COLLECTION_ID', 'classes'),
     tabsCollectionId: env('APPWRITE_TABS_COLLECTION_ID', 'tabs'),
     cardsCollectionId: env('APPWRITE_CARDS_COLLECTION_ID', 'cards'),
@@ -51,6 +55,8 @@ export async function upsertDriveConnection({
         teacherId,
         googleUserId,
         refreshTokenEnc,
+        // Preserve any previously chosen root folder.
+        rootFolderId: doc.rootFolderId || '',
       },
     );
   }
@@ -63,6 +69,7 @@ export async function upsertDriveConnection({
       teacherId,
       googleUserId,
       refreshTokenEnc,
+      rootFolderId: '',
     },
   );
 }
@@ -120,5 +127,41 @@ export async function classContainsFileId({ databases, classId, fileId }) {
     }
   }
   return false;
+}
+
+export async function logDeletedDriveItem({
+  databases,
+  teacherId,
+  driveFileId,
+  name,
+  kind,
+}) {
+  const { databaseId, deletedDriveItemsCollectionId } = schemaIds();
+  return await databases.createDocument(
+    databaseId,
+    deletedDriveItemsCollectionId,
+    ID.unique(),
+    {
+      teacherId,
+      driveFileId,
+      name,
+      kind,
+      deletedAt: new Date().toISOString(),
+      restoredAt: '',
+    },
+  );
+}
+
+export async function markDeletedDriveItemRestored({
+  databases,
+  deletedItemId,
+}) {
+  const { databaseId, deletedDriveItemsCollectionId } = schemaIds();
+  return await databases.updateDocument(
+    databaseId,
+    deletedDriveItemsCollectionId,
+    deletedItemId,
+    { restoredAt: new Date().toISOString() },
+  );
 }
 

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import '../../../services/drive/drive_api.dart';
 import '../../../domain/models/card_item.dart';
 import '../../../services/web/blob_url.dart';
 import '../../../utils/tab_color.dart';
+import '../../../domain/models/image_annotation.dart';
 
 class CardViewerScreen extends ConsumerStatefulWidget {
   const CardViewerScreen({
@@ -86,6 +88,7 @@ class _CardViewerScreenState extends ConsumerState<CardViewerScreen> {
     final drive = ref.read(driveApiProvider);
 
     Future<void> ensure(String fileId) async {
+      if (fileId.trim().isEmpty) return;
       if (_dataUrlCache.containsKey(fileId)) return;
       final url = await drive.publicDownloadDataUrl(
         publicToken: widget.publicToken,
@@ -156,6 +159,7 @@ class _CardViewerScreenState extends ConsumerState<CardViewerScreen> {
 
   Future<void> _togglePlay() async {
     final card = _cards[_index];
+    if (card.audioDriveFileId.trim().isEmpty) return;
     final String? audioUrl = _dataUrlCache[card.audioDriveFileId];
     if (audioUrl == null) return;
 
@@ -241,7 +245,9 @@ class _CardViewerScreenState extends ConsumerState<CardViewerScreen> {
     }
 
     final CardItem card = _cards[_index];
-    final String? imageUrl = _dataUrlCache[card.imageDriveFileId];
+    final String? imageUrl = card.imageDriveFileId.trim().isEmpty
+        ? null
+        : _dataUrlCache[card.imageDriveFileId];
     final bool hasPrev = _index > 0;
     final bool hasNext = _index < _cards.length - 1;
 
@@ -294,15 +300,44 @@ class _CardViewerScreenState extends ConsumerState<CardViewerScreen> {
                           .colorScheme
                           .surfaceContainerHighest,
                       child: imageUrl == null
-                          ? const Center(child: CircularProgressIndicator())
-                          : Image.network(
-                              imageUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return const Center(
-                                  child: Text('Afbeelding laden mislukt'),
-                                );
-                              },
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(20),
+                                child: Text(
+                                  (card.title == null || card.title!.trim().isEmpty)
+                                      ? '(zonder titel)'
+                                      : card.title!.trim(),
+                                  textAlign: TextAlign.center,
+                                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                      ),
+                                ),
+                              ),
+                            )
+                          : Stack(
+                              fit: StackFit.expand,
+                              children: <Widget>[
+                                Image.network(
+                                  imageUrl,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return const Center(
+                                      child: Text('Afbeelding laden mislukt'),
+                                    );
+                                  },
+                                ),
+                                LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final ann = ImageAnnotations.tryParse(card.imageAnnotationsJson);
+                                    if (ann == null || ann.items.isEmpty) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    return CustomPaint(
+                                      painter: _ImageAnnotOverlayPainter(items: ann.items),
+                                    );
+                                  },
+                                ),
+                              ],
                             ),
                     ),
                   ),
@@ -342,6 +377,107 @@ class _CardViewerScreenState extends ConsumerState<CardViewerScreen> {
         ),
       ),
     );
+  }
+}
+
+class _ImageAnnotOverlayPainter extends CustomPainter {
+  const _ImageAnnotOverlayPainter({required this.items});
+
+  final List<ImageAnnotationItem> items;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final it in items) {
+      if (it is ArrowAnnotation) {
+        _paintArrow(canvas, size, it);
+      } else if (it is TextAnnotation) {
+        _paintText(canvas, size, it);
+      }
+    }
+  }
+
+  void _paintArrow(Canvas canvas, Size size, ArrowAnnotation a) {
+    final p1 = Offset(a.fromX * size.width, a.fromY * size.height);
+    final p2 = Offset(a.toX * size.width, a.toY * size.height);
+    final dir = (p2 - p1);
+    if (dir.distance < 4) return;
+
+    final u = dir / dir.distance;
+    final n = Offset(-u.dy, u.dx);
+
+    final thickness = a.widthRel != null
+        ? max(2.0, a.widthRel! * min(size.width, size.height))
+        : (a.width <= 0 ? 2.0 : a.width.toDouble());
+    final headLen = thickness * 4.0;
+    final headWidth = thickness * 3.0;
+    final base = p2 - u * headLen;
+
+    final halfShaft = thickness / 2;
+    final halfHead = headWidth / 2;
+
+    final shaftLeftStart = p1 + n * halfShaft;
+    final shaftRightStart = p1 - n * halfShaft;
+    final shaftLeftEnd = base + n * halfShaft;
+    final shaftRightEnd = base - n * halfShaft;
+    final headLeft = base + n * halfHead;
+    final headRight = base - n * halfHead;
+
+    final path = Path()
+      ..moveTo(shaftLeftStart.dx, shaftLeftStart.dy)
+      ..lineTo(shaftLeftEnd.dx, shaftLeftEnd.dy)
+      ..lineTo(headLeft.dx, headLeft.dy)
+      ..lineTo(p2.dx, p2.dy)
+      ..lineTo(headRight.dx, headRight.dy)
+      ..lineTo(shaftRightEnd.dx, shaftRightEnd.dy)
+      ..lineTo(shaftRightStart.dx, shaftRightStart.dy)
+      ..close();
+
+    final fillPaint = Paint()
+      ..color = const Color(0xFFFFFFFF)
+      ..style = PaintingStyle.fill;
+    final outlinePaint = Paint()
+      ..color = const Color(0xFF000000)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = max(2.0, thickness * 0.35)
+      ..strokeJoin = StrokeJoin.round;
+
+    canvas.drawPath(path, fillPaint);
+    canvas.drawPath(path, outlinePaint);
+  }
+
+  void _paintText(Canvas canvas, Size size, TextAnnotation t) {
+    final pos = Offset(t.atX * size.width, t.atY * size.height);
+    final style = TextStyle(
+      color: _parseHex(t.colorHex, fallback: const Color(0xFF000000)),
+      fontSize: t.sizeRel != null
+          ? max(10.0, t.sizeRel! * min(size.width, size.height))
+          : t.size,
+      fontWeight: FontWeight.w700,
+      shadows: const <Shadow>[Shadow(blurRadius: 2, offset: Offset(0, 1))],
+    );
+    final painter = TextPainter(
+      text: TextSpan(text: t.text, style: style),
+      textDirection: TextDirection.ltr,
+      maxLines: 3,
+      ellipsis: '…',
+    )..layout(maxWidth: size.width);
+    painter.paint(canvas, pos);
+  }
+
+  Color _parseHex(String hex, {required Color fallback}) {
+    final h = hex.trim();
+    if (!h.startsWith('#')) return fallback;
+    final raw = h.substring(1);
+    final v = int.tryParse(raw, radix: 16);
+    if (v == null) return fallback;
+    if (raw.length == 6) return Color(0xFF000000 | v);
+    if (raw.length == 8) return Color(v);
+    return fallback;
+  }
+
+  @override
+  bool shouldRepaint(covariant _ImageAnnotOverlayPainter oldDelegate) {
+    return oldDelegate.items != items;
   }
 }
 

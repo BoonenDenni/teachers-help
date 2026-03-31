@@ -10,6 +10,8 @@ class CardItem {
     required this.audioDriveFileId,
     required this.imageMimeType,
     required this.audioMimeType,
+    required this.imageAnnotationsJson,
+    required this.driveFolderId,
     required this.sortOrder,
     required this.createdAtIso,
   });
@@ -21,6 +23,8 @@ class CardItem {
   final String audioDriveFileId;
   final String imageMimeType;
   final String audioMimeType;
+  final String? imageAnnotationsJson;
+  final String? driveFolderId;
   final int sortOrder;
   final String createdAtIso;
 
@@ -33,6 +37,8 @@ class CardItem {
       audioDriveFileId: audioDriveFileId,
       imageMimeType: imageMimeType,
       audioMimeType: audioMimeType,
+      imageAnnotationsJson: imageAnnotationsJson,
+      driveFolderId: driveFolderId,
       sortOrder: sortOrder ?? this.sortOrder,
       createdAtIso: createdAtIso,
     );
@@ -47,6 +53,10 @@ class CardItem {
       audioDriveFileId: doc['audioDriveFileId'] as String,
       imageMimeType: doc['imageMimeType'] as String,
       audioMimeType: doc['audioMimeType'] as String,
+      imageAnnotationsJson: doc['imageAnnotationsJson'] as String?,
+      driveFolderId: (doc['driveFolderId'] as String?)?.trim().isEmpty == true
+          ? null
+          : (doc['driveFolderId'] as String?),
       sortOrder: (doc['sortOrder'] as num).toInt(),
       createdAtIso: doc['createdAt'] as String,
     );

@@ -59,6 +59,127 @@ class DriveApi {
     );
   }
 
+  Future<String> getRootFolderId() async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.gET,
+      path: '/drive/root',
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive root');
+    final id = data['rootFolderId'];
+    return (id is String) ? id : '';
+  }
+
+  Future<void> setRootFolderId(String rootFolderId) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/drive/root',
+      body: jsonEncode(<String, dynamic>{'rootFolderId': rootFolderId}),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive root set');
+    if (data['ok'] != true) {
+      throw StateError('Rootmap instellen mislukt.');
+    }
+  }
+
+  Future<String> ensureFolder({String? parentId, required String name}) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/drive/folder/ensure',
+      body: jsonEncode(<String, dynamic>{
+        if (parentId != null && parentId.trim().isNotEmpty) 'parentId': parentId.trim(),
+        'name': name,
+      }),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive folder ensure');
+    final id = data['id'];
+    if (id is! String || id.isEmpty) {
+      throw StateError('Drive folder ensure: ontbrekende id.');
+    }
+    return id;
+  }
+
+  Future<void> renameFolder({required String folderId, required String newName}) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/drive/folder/rename',
+      body: jsonEncode(<String, dynamic>{
+        'folderId': folderId,
+        'newName': newName,
+      }),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive folder rename');
+    if (data['ok'] != true) throw StateError('Drive map hernoemen mislukt.');
+  }
+
+  Future<void> trashItem({required String fileId}) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/drive/item/trash',
+      body: jsonEncode(<String, dynamic>{'fileId': fileId}),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive item trash');
+    if (data['ok'] != true) throw StateError('Drive item verwijderen (prullenbak) mislukt.');
+  }
+
+  Future<void> restoreItem({required String fileId}) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/drive/item/restore',
+      body: jsonEncode(<String, dynamic>{'fileId': fileId}),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive item restore');
+    if (data['ok'] != true) throw StateError('Drive item herstellen mislukt.');
+  }
+
+  Future<void> trashAndLog({
+    required String fileId,
+    required String name,
+    required String kind,
+  }) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/drive/item/trash_and_log',
+      body: jsonEncode(<String, dynamic>{
+        'fileId': fileId,
+        'name': name,
+        'kind': kind,
+      }),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive item trash+log');
+    if (data['ok'] != true) throw StateError('Verwijderen (Drive + log) mislukt.');
+  }
+
+  Future<void> restoreAndMark({
+    required String fileId,
+    required String deletedItemId,
+  }) async {
+    final result = await functions.createExecution(
+      functionId: functionId,
+      method: ExecutionMethod.pOST,
+      path: '/drive/item/restore_and_mark',
+      body: jsonEncode(<String, dynamic>{
+        'fileId': fileId,
+        'deletedItemId': deletedItemId,
+      }),
+      headers: <String, String>{'content-type': 'application/json'},
+    );
+    final data = _decodeJsonObject(result.responseBody, context: 'Drive item restore+mark');
+    if (data['ok'] != true) throw StateError('Herstellen (Drive + log) mislukt.');
+  }
+
   Future<String> getAccessToken() async {
     final result = await functions.createExecution(
       functionId: functionId,
